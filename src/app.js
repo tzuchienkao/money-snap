@@ -28,6 +28,21 @@ if (limitsNoticeEl) {
   }
 }
 
+/**
+ * 安全地發送 GA 事件的輔助函式
+ * 確保如果全域 gtag 尚未載入完成時，程式不會崩潰
+ */
+function sendGaEvent(eventName, label) {
+  if (typeof window.gtag === 'function') {
+    window.gtag('event', eventName, {
+      'event_category': 'engagement',
+      'event_label': label
+    });
+  } else {
+    console.log(`[GA Simulation] Event: ${eventName}, Label: ${label}`);
+  }
+}
+
 function saveState(payload) {
   try {
     // merge with existing saved state so callers can pass partial updates
@@ -251,8 +266,16 @@ function parseAndCompute() {
 }
 
 // 事件綁定
-calcBtn.addEventListener('click', parseAndCompute);
-clearBtn.addEventListener('click', clearAll);
+calcBtn.addEventListener('click', () => {
+  // 觸發 GA 事件：點擊計算（不搜集任何隱私文字與金額數值）
+  sendGaEvent('click_calculate', '計算與統計');
+  parseAndCompute();
+});
+clearBtn.addEventListener('click', () => {
+  // 觸發 GA 事件：點擊一鍵清除
+  sendGaEvent('click_clear', '一鍵清除');
+  clearAll();
+});
 function formatDateForWatermark(d){
   const pad=(n)=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -260,6 +283,9 @@ function formatDateForWatermark(d){
 
 exportBtn.addEventListener('click', async ()=>{
   if (typeof html2canvas === 'undefined') { alert('html2canvas 尚未載入'); return; }
+
+  // 觸發 GA 事件：點擊匯出明細圖片
+  sendGaEvent('click_export_image', '匯出明細圖');
   
   const shutterFlash = document.getElementById('shutterFlash');
   const orig = document.getElementById('app') || document.body;
