@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 dist/
 .env
+*.bak
+debug_*.html
+test_*.html
