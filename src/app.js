@@ -34,8 +34,18 @@ function saveState(payload) {
     const raw = localStorage.getItem(saveKey);
     const prev = raw ? JSON.parse(raw) : {};
     const merged = Object.assign({}, prev, payload);
-    localStorage.setItem(saveKey, JSON.stringify(merged));
-  } catch (e) { console.warn('saveState failed', e); }
+    
+    // Custom JSON serialization to handle BigInt
+    localStorage.setItem(saveKey, JSON.stringify(merged, (key, value) => {
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      return value;
+    }));
+  } catch (e) { 
+    console.warn('saveState failed', e); 
+    console.error('Failed payload:', payload);
+  }
 }
 
 function loadState() {
@@ -213,20 +223,31 @@ function parseAndCompute() {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const timeStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const timestampISO = now.toISOString();
     calcTimestampEl.textContent = `計算時間：${timeStr}`;
+    
+    // Store timestamp in state for restoration
+    saveState({
+      input: inputArea.value,
+      lastParsedAt: timestampISO,
+      calcTimestamp: timeStr, // Store formatted timestamp
+      parsedEntries: result.entries,
+      bank: bank,
+      lastValid: valid
+    });
+  } else {
+    // Save invalid state without timestamp
+    saveState({
+      input: inputArea.value,
+      lastParsedAt: new Date().toISOString(),
+      parsedEntries: result.entries,
+      bank: bank,
+      lastValid: valid
+    });
   }
 
   // Update button states after validation
   updateButtonStates();
-
-  // 儲存整個狀態（合併舊資料）
-  saveState({
-    input: inputArea.value,
-    lastParsedAt: new Date().toISOString(),
-    parsedEntries: result.entries,
-    bank: bank,
-    lastValid: valid
-  });
 }
 
 // 事件綁定
@@ -239,68 +260,77 @@ function formatDateForWatermark(d){
 
 exportBtn.addEventListener('click', async ()=>{
   if (typeof html2canvas === 'undefined') { alert('html2canvas 尚未載入'); return; }
+  
+  const shutterFlash = document.getElementById('shutterFlash');
   const orig = document.getElementById('app') || document.body;
-  const bottomControls = document.getElementById('bottomControls');
   const errorMsgEl = document.getElementById('errorMsg');
   const textarea = orig.querySelector('textarea');
+  const calcTimestamp = document.getElementById('calcTimestamp');
 
-  // create replacement div for textarea to preserve line breaks
-  const replacement = document.createElement('div');
-  replacement.className = textarea.className;
-  replacement.textContent = textarea.value;
-  Object.assign(replacement.style, {
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'break-word',
-    minHeight: getComputedStyle(textarea).height || '80px',
-    padding: getComputedStyle(textarea).padding,
-    border: getComputedStyle(textarea).border,
-    background: getComputedStyle(textarea).backgroundColor,
-    color: getComputedStyle(textarea).color,
-    borderRadius: getComputedStyle(textarea).borderRadius,
-    lineHeight: '1.25'
-  });
-  replacement.classList.add('export-text-replacement');
+  try {
+    // Step 1: Trigger shutter flash effect (fade in) - faster timing
+    shutterFlash.classList.add('active');
+    await new Promise(resolve => setTimeout(resolve, 80)); // Reduced from 150ms to 80ms
 
-  // hide export button, bottom control buttons, error message - use visibility to prevent layout jump
-  // Keep bottomControls container visible to maintain its min-height
-  const prevExportVisibility = exportBtn.style.visibility;
-  const prevClearBtnVisibility = clearBtn.style.visibility;
-  const prevCalcBtnVisibility = calcBtn.style.visibility;
-  const prevErrorVisibility = errorMsgEl ? errorMsgEl.style.visibility : null;
-  exportBtn.style.visibility = 'hidden';
-  clearBtn.style.visibility = 'hidden';
-  calcBtn.style.visibility = 'hidden';
-  if (errorMsgEl) errorMsgEl.style.visibility = 'hidden';
-  textarea.parentNode.replaceChild(replacement, textarea);
+    // Step 2: While screen is white, make DOM changes (hide buttons, replace textarea)
+    // create replacement div for textarea to preserve line breaks
+    const replacement = document.createElement('div');
+    replacement.className = textarea.className;
+    replacement.textContent = textarea.value;
+    Object.assign(replacement.style, {
+      whiteSpace: 'pre-wrap',
+      overflowWrap: 'break-word',
+      minHeight: getComputedStyle(textarea).height || '80px',
+      padding: getComputedStyle(textarea).padding,
+      border: getComputedStyle(textarea).border,
+      background: getComputedStyle(textarea).backgroundColor,
+      color: getComputedStyle(textarea).color,
+      borderRadius: getComputedStyle(textarea).borderRadius,
+      lineHeight: '1.25'
+    });
+    replacement.classList.add('export-text-replacement');
 
-  // Wait for browser to complete reflow after DOM changes
-  await new Promise(resolve => requestAnimationFrame(resolve));
+    // hide export button, bottom control buttons, error message, timestamp - use visibility to prevent layout jump
+    const prevExportVisibility = exportBtn.style.visibility;
+    const prevClearBtnVisibility = clearBtn.style.visibility;
+    const prevCalcBtnVisibility = calcBtn.style.visibility;
+    const prevErrorVisibility = errorMsgEl ? errorMsgEl.style.visibility : null;
+    const prevTimestampVisibility = calcTimestamp ? calcTimestamp.style.visibility : null;
+    
+    exportBtn.style.visibility = 'hidden';
+    clearBtn.style.visibility = 'hidden';
+    calcBtn.style.visibility = 'hidden';
+    if (errorMsgEl) errorMsgEl.style.visibility = 'hidden';
+    if (calcTimestamp) calcTimestamp.style.visibility = 'hidden';
+    textarea.parentNode.replaceChild(replacement, textarea);
 
-  // add watermark element
-  const watermark = document.createElement('div');
-  watermark.id = 'export-watermark';
-  watermark.textContent = formatDateForWatermark(new Date());
-  Object.assign(watermark.style, {
-    position: 'absolute',
-    right: '12px',
-    bottom: '12px',
-    opacity: '0.45',
-    color: '#111827',
-    background: 'rgba(255,255,255,0.6)',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    zIndex: 9999,
-    pointerEvents: 'none'
-  });
-  if (getComputedStyle(orig).position === 'static') orig.style.position = 'relative';
-  orig.appendChild(watermark);
+    // Wait for browser to complete reflow after DOM changes
+    await new Promise(resolve => requestAnimationFrame(resolve));
 
-  try{
+    // add watermark element
+    const watermark = document.createElement('div');
+    watermark.id = 'export-watermark';
+    watermark.textContent = formatDateForWatermark(new Date());
+    Object.assign(watermark.style, {
+      position: 'absolute',
+      right: '12px',
+      bottom: '12px',
+      opacity: '0.45',
+      color: '#111827',
+      background: 'rgba(255,255,255,0.6)',
+      padding: '4px 8px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      zIndex: 9999,
+      pointerEvents: 'none'
+    });
+    if (getComputedStyle(orig).position === 'static') orig.style.position = 'relative';
+    orig.appendChild(watermark);
+
     // Wait another frame to ensure all changes are rendered
     await new Promise(resolve => requestAnimationFrame(resolve));
 
-    // Capture directly from the modified orig element
+    // Step 3: Capture screenshot (while flash is still active)
     const canvas = await html2canvas(orig, { 
       useCORS: true, 
       logging: false, 
@@ -308,25 +338,43 @@ exportBtn.addEventListener('click', async ()=>{
       backgroundColor: getComputedStyle(orig).backgroundColor || '#ffffff'
     });
     
-    const a = document.createElement('a');
-    a.href = canvas.toDataURL('image/png');
-    a.download = `money-snap-${new Date().toISOString().slice(0,16).replace('T','_')}.png`;
-    a.click();
-    // record export timestamp/meta (no image saved)
-    try{ saveState({ lastExportAt: new Date().toISOString() }); }catch(e){/*ignore*/}
-  }finally{
-    // restore
+    // Step 4: Restore DOM elements before fading out flash
     watermark.remove();
     replacement.parentNode.replaceChild(textarea, replacement);
     exportBtn.style.visibility = prevExportVisibility || '';
     clearBtn.style.visibility = prevClearBtnVisibility || '';
     calcBtn.style.visibility = prevCalcBtnVisibility || '';
     if (errorMsgEl) errorMsgEl.style.visibility = prevErrorVisibility || '';
+    if (calcTimestamp) calcTimestamp.style.visibility = prevTimestampVisibility || '';
+
+    // Step 5: Fade out shutter flash
+    shutterFlash.classList.remove('active');
+    
+    // Step 6: Download the image
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `money-snap-${new Date().toISOString().slice(0,16).replace('T','_')}.png`;
+    a.click();
+    
+    // record export timestamp/meta (no image saved)
+    try{ saveState({ lastExportAt: new Date().toISOString() }); }catch(e){/*ignore*/}
+    
+  } catch (error) {
+    // On error, ensure flash is removed and elements are restored
+    console.error('Export failed:', error);
+    shutterFlash.classList.remove('active');
+    alert('匯出失敗，請重試');
   }
 });
 
 inputArea.addEventListener('input', ()=>{ 
-  saveState({ input: inputArea.value }); 
+  // Clear calculation results when input changes
+  saveState({ 
+    input: inputArea.value,
+    bank: null,
+    calcTimestamp: null,
+    lastValid: false
+  }); 
   updateButtonStates(); // Update button states on input change
 });
 
@@ -334,11 +382,58 @@ inputArea.addEventListener('input', ()=>{
 const prev = loadState();
 if (prev && prev.input) {
   inputArea.value = prev.input;
-  // rerun compute to restore UI; run after a short delay so DOM is ready
-  setTimeout(()=>{ try{ parseAndCompute(); }catch(e){ console.warn('restore parse failed', e); } }, 50);
+  
+  // Restore UI from saved state if available
+  if (prev.bank && prev.lastValid) {
+    setTimeout(() => {
+      try {
+        // Restore results display
+        const bank = prev.bank;
+        tbody.innerHTML = '';
+        const denom = [1000,500,100,50,10,5,1];
+        
+        for (const p of bank.perPerson) {
+          const rowDenom = p.breakdown;
+          const tr = document.createElement('tr');
+          const breakdownHtml = denom.map(d => {
+            const c = rowDenom[d] || 0;
+            return `<span class="inline-block bg-gray-100 text-gray-800 px-2 py-0.5 rounded mr-1 text-xs">${d}×${c}</span>`;
+          }).join('');
+          tr.innerHTML = `<td class="p-2">${p.name}</td><td class="p-2 text-center">${formatAmount(p.total)}</td><td class="p-2 text-sm">${breakdownHtml}</td>`;
+          tbody.appendChild(tr);
+        }
+        
+        // Restore totals
+        document.getElementById('d1000').textContent = (bank.totals[1000] || 0).toLocaleString();
+        document.getElementById('d500').textContent = (bank.totals[500] || 0).toLocaleString();
+        document.getElementById('d100').textContent = (bank.totals[100] || 0).toLocaleString();
+        document.getElementById('d50').textContent = (bank.totals[50] || 0).toLocaleString();
+        document.getElementById('d10').textContent = (bank.totals[10] || 0).toLocaleString();
+        document.getElementById('d5').textContent = (bank.totals[5] || 0).toLocaleString();
+        document.getElementById('d1').textContent = (bank.totals[1] || 0).toLocaleString();
+        document.getElementById('totalAmount').textContent = formatAmount(bank.totalAmount);
+        
+        // Restore timestamp if available
+        if (prev.calcTimestamp) {
+          calcTimestampEl.textContent = `計算時間：${prev.calcTimestamp}`;
+        }
+        
+        // Restore validation state
+        isDataValidForExport = true;
+        exportBtn.disabled = false;
+        updateButtonStates();
+      } catch (e) {
+        console.warn('restore state failed', e);
+        updateButtonStates();
+      }
+    }, 50);
+  } else {
+    // If no valid saved state, just update button states
+    setTimeout(() => updateButtonStates(), 50);
+  }
+} else {
+  // No previous data, initialize button states
+  updateButtonStates();
 }
-
-// Initialize button states on page load
-updateButtonStates();
 
 export { };

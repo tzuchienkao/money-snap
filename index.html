@@ -35,6 +35,23 @@
       cursor: not-allowed;
       filter: grayscale(0.3);
     }
+    
+    /* Camera shutter flash effect overlay */
+    #shutterFlash {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: white;
+      pointer-events: none;
+      z-index: 99999;
+      opacity: 0;
+      transition: opacity 0.08s ease-out;
+    }
+    #shutterFlash.active {
+      opacity: 0.9;
+    }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900 p-6">
@@ -89,6 +106,9 @@
       </table>
     </section>
   </div>
+
+  <!-- Camera shutter flash overlay -->
+  <div id="shutterFlash"></div>
 
   <!-- html2canvas CDN (for export) -->
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>

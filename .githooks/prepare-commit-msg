@@ -1,0 +1,33 @@
+#!/bin/sh
+# prepare-commit-msg hook: append Co-authored-by entries from .coauthors file
+# Args: $1 = commit-msg-file, $2 = commit source (message, template, merge, squash, commit)
+MSG_FILE="$1"
+SOURCE="$2"
+COAUTH_FILE=".coauthors"
+
+# Do not modify merge/squash commits or if coauthors file missing
+if [ "$SOURCE" = "merge" ] || [ "$SOURCE" = "squash" ]; then
+  exit 0
+fi
+if [ ! -f "$COAUTH_FILE" ]; then
+  exit 0
+fi
+
+# If commit message already contains Co-authored-by, skip
+if grep -q "Co-authored-by:" "$MSG_FILE"; then
+  exit 0
+fi
+
+# Read coauthors and append non-empty, non-comment lines as trailers
+while IFS= read -r line || [ -n "$line" ]; do
+  # Trim leading/trailing whitespace
+  author=$(printf "%s" "$line" | sed 's/^\\s*//;s/\\s*$//')
+  # Skip empty or comment lines
+  [ -z "$author" ] && continue
+  case "$author" in
+    \#*) continue ;;
+  esac
+  printf "\nCo-authored-by: %s\n" "$author" >> "$MSG_FILE"
+done < "$COAUTH_FILE"
+
+exit 0
