@@ -12,13 +12,17 @@ const exportBtn = document.getElementById('exportBtn');
 const errorMsg = document.getElementById('errorMsg');
 const tbody = document.getElementById('personRows');
 const limitsNoticeEl = document.getElementById('limitsNotice');
+const calcTimestampEl = document.getElementById('calcTimestamp');
 
 const saveKey = 'money-snap:mvp:v1';
+
+// State variable to track if data is valid for export
+let isDataValidForExport = false;
 
 // render dynamic limits if element present
 if (limitsNoticeEl) {
   try {
-    limitsNoticeEl.textContent = `注意：每次最多可貼入 ${MAX_ENTRIES.toLocaleString()} 筆；每筆金額之整數部分上限為 ${MAX_PER_ENTRY.toLocaleString()}（若超過會回傳錯誤）。`;
+    limitsNoticeEl.textContent = `格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）\n注意：每次最多可貼入 ${MAX_ENTRIES.toLocaleString()} 筆；每筆金額之整數部分上限為 ${MAX_PER_ENTRY.toLocaleString()}；姓名可重複多筆，系統會自動加總。`;
   } catch (e) {
     // ignore if config not available in this environment
   }
@@ -42,13 +46,30 @@ function loadState() {
   } catch (e) { console.warn('loadState failed', e); return null; }
 }
 
+// Update button states based on textarea content and validation status
+function updateButtonStates() {
+  const hasContent = inputArea.value.trim().length > 0;
+  
+  // clearBtn: enabled only when there's content
+  clearBtn.disabled = !hasContent;
+  
+  // calcBtn: enabled only when there's content
+  calcBtn.disabled = !hasContent;
+  
+  // exportBtn: enabled only when data is valid (after successful calculation)
+  exportBtn.disabled = !isDataValidForExport;
+}
+
 function clearAll() {
   if (!confirm('確定要清除所有資料？此動作無法復原。')) return;
   inputArea.value = '';
   tbody.innerHTML = '';
   ['d1000','d500','d100','d50','d10','d5','d1','totalAmount'].forEach(id=>document.getElementById(id).textContent='0');
   errorMsg.textContent = '';
+  calcTimestampEl.textContent = ''; // Clear timestamp
+  isDataValidForExport = false;
   localStorage.removeItem(saveKey);
+  updateButtonStates(); // Update button states after clearing
 }
 
 function numberWithCommas(s){
@@ -98,14 +119,44 @@ function renderResults(entries) {
 }
 
 
+// Helper: select (highlight) a specific line in textarea
+function selectLineInTextarea(textarea, lineNumber) {
+  const lines = textarea.value.split(/\r?\n/);
+  if (lineNumber < 1 || lineNumber > lines.length) return;
+  
+  // Calculate character position of the target line (0-based line index = lineNumber - 1)
+  let start = 0;
+  for (let i = 0; i < lineNumber - 1; i++) {
+    start += lines[i].length + 1; // +1 for newline character
+  }
+  const end = start + lines[lineNumber - 1].length;
+  
+  // Add error-highlight class for custom selection color
+  textarea.classList.add('error-highlight');
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+}
+
 function parseAndCompute() {
   errorMsg.textContent = '';
+  isDataValidForExport = false; // Reset validation state
   exportBtn.disabled = true; // disable until checks pass
+  
+  // Remove error-highlight class when re-running computation
+  inputArea.classList.remove('error-highlight');
+  
   const text = inputArea.value;
-  if (!text || text.trim().length === 0) { alert('請貼上資料後再執行計算。'); return; }
+  if (!text || text.trim().length === 0) { 
+    alert('請貼上資料後再執行計算。'); 
+    updateButtonStates();
+    return; 
+  }
   const result = parseInput(text);
   if (result.error) {
     errorMsg.textContent = `第 ${result.error.line} 行錯誤：${result.error.message} （${result.error.raw}）`;
+    // Auto-select (highlight) the error line
+    selectLineInTextarea(inputArea, result.error.line);
+    updateButtonStates();
     return;
   }
   const bank = renderResults(result.entries);
@@ -123,6 +174,7 @@ function parseAndCompute() {
       errorMsg.textContent = `驗證錯誤：${p.name} 的累計金額超過單人上限 ${MAX_PER_PERSON}`;
       exportBtn.disabled = true;
       saveState({ input: inputArea.value, lastParsedAt: new Date().toISOString(), parsedEntries: result.entries, bank, lastValid: false });
+      updateButtonStates();
       return;
     }
   }
@@ -131,6 +183,7 @@ function parseAndCompute() {
     errorMsg.textContent = `驗證錯誤：總額超過上限 ${MAX_TOTAL}`;
     exportBtn.disabled = true;
     saveState({ input: inputArea.value, lastParsedAt: new Date().toISOString(), parsedEntries: result.entries, bank, lastValid: false });
+    updateButtonStates();
     return;
   }
 
@@ -151,7 +204,20 @@ function parseAndCompute() {
       exportBtn.disabled = true;
     }
   }
-  if (valid) { errorMsg.textContent = ''; exportBtn.disabled = false; }
+  if (valid) { 
+    errorMsg.textContent = ''; 
+    exportBtn.disabled = false;
+    isDataValidForExport = true; // Set validation state to true
+    
+    // Update timestamp display
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const timeStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    calcTimestampEl.textContent = `計算時間：${timeStr}`;
+  }
+
+  // Update button states after validation
+  updateButtonStates();
 
   // 儲存整個狀態（合併舊資料）
   saveState({
@@ -174,7 +240,8 @@ function formatDateForWatermark(d){
 exportBtn.addEventListener('click', async ()=>{
   if (typeof html2canvas === 'undefined') { alert('html2canvas 尚未載入'); return; }
   const orig = document.getElementById('app') || document.body;
-  const controls = document.getElementById('topControls');
+  const bottomControls = document.getElementById('bottomControls');
+  const errorMsgEl = document.getElementById('errorMsg');
   const textarea = orig.querySelector('textarea');
 
   // create replacement div for textarea to preserve line breaks
@@ -194,10 +261,20 @@ exportBtn.addEventListener('click', async ()=>{
   });
   replacement.classList.add('export-text-replacement');
 
-  // hide controls and replace textarea in-place
-  const prevDisplay = controls ? controls.style.display : null;
-  if (controls) controls.style.display = 'none';
+  // hide export button, bottom control buttons, error message - use visibility to prevent layout jump
+  // Keep bottomControls container visible to maintain its min-height
+  const prevExportVisibility = exportBtn.style.visibility;
+  const prevClearBtnVisibility = clearBtn.style.visibility;
+  const prevCalcBtnVisibility = calcBtn.style.visibility;
+  const prevErrorVisibility = errorMsgEl ? errorMsgEl.style.visibility : null;
+  exportBtn.style.visibility = 'hidden';
+  clearBtn.style.visibility = 'hidden';
+  calcBtn.style.visibility = 'hidden';
+  if (errorMsgEl) errorMsgEl.style.visibility = 'hidden';
   textarea.parentNode.replaceChild(replacement, textarea);
+
+  // Wait for browser to complete reflow after DOM changes
+  await new Promise(resolve => requestAnimationFrame(resolve));
 
   // add watermark element
   const watermark = document.createElement('div');
@@ -220,56 +297,17 @@ exportBtn.addEventListener('click', async ()=>{
   orig.appendChild(watermark);
 
   try{
-    // compute bounding box of orig
-    const rect = orig.getBoundingClientRect();
-    const bgColor = getComputedStyle(orig).backgroundColor || '#ffffff';
+    // Wait another frame to ensure all changes are rendered
+    await new Promise(resolve => requestAnimationFrame(resolve));
 
-    // create an isolated wrapper positioned at same viewport location
-    const wrapper = document.createElement('div');
-    wrapper.id = 'export-wrapper';
-    Object.assign(wrapper.style, {
-      position: 'absolute',
-      left: `${rect.left + window.scrollX}px`,
-      top: `${rect.top + window.scrollY}px`,
-      width: `${rect.width}px`,
-      height: `${rect.height}px`,
-      backgroundColor: bgColor,
-      zIndex: 2147483000,
-      overflow: 'hidden'
+    // Capture directly from the modified orig element
+    const canvas = await html2canvas(orig, { 
+      useCORS: true, 
+      logging: false, 
+      scale: Math.max(1, window.devicePixelRatio),
+      backgroundColor: getComputedStyle(orig).backgroundColor || '#ffffff'
     });
-
-    // clone content into wrapper
-    const clone = orig.cloneNode(true);
-    // remove control buttons inside clone to be safe
-    const cloneControls = clone.querySelector('#topControls');
-    if (cloneControls) cloneControls.remove();
-    // replace textarea with div in clone
-    const cloneTextareas = clone.querySelectorAll('textarea');
-    cloneTextareas.forEach(ta => {
-      const d = document.createElement('div');
-      d.className = ta.className;
-      d.textContent = ta.value || '';
-      Object.assign(d.style, {
-        whiteSpace: 'pre-wrap',
-        overflowWrap: 'break-word',
-        minHeight: getComputedStyle(ta).height || '80px',
-        padding: getComputedStyle(ta).padding,
-        border: getComputedStyle(ta).border,
-        background: getComputedStyle(ta).backgroundColor,
-        color: getComputedStyle(ta).color,
-        borderRadius: getComputedStyle(ta).borderRadius,
-        lineHeight: '1.25'
-      });
-      ta.parentNode.replaceChild(d, ta);
-    });
-
-    wrapper.appendChild(clone);
-    document.body.appendChild(wrapper);
-
-    // wait two frames to ensure layout & paint
-    await new Promise((res)=> requestAnimationFrame(()=> requestAnimationFrame(res)));
-
-    const canvas = await html2canvas(wrapper, { useCORS: true, logging: false, scale: Math.max(1, window.devicePixelRatio), backgroundColor: bgColor });
+    
     const a = document.createElement('a');
     a.href = canvas.toDataURL('image/png');
     a.download = `money-snap-${new Date().toISOString().slice(0,16).replace('T','_')}.png`;
@@ -278,15 +316,19 @@ exportBtn.addEventListener('click', async ()=>{
     try{ saveState({ lastExportAt: new Date().toISOString() }); }catch(e){/*ignore*/}
   }finally{
     // restore
-    const wrapperEl = document.getElementById('export-wrapper');
-    if (wrapperEl) wrapperEl.remove();
     watermark.remove();
     replacement.parentNode.replaceChild(textarea, replacement);
-    if (controls) controls.style.display = prevDisplay || '';
+    exportBtn.style.visibility = prevExportVisibility || '';
+    clearBtn.style.visibility = prevClearBtnVisibility || '';
+    calcBtn.style.visibility = prevCalcBtnVisibility || '';
+    if (errorMsgEl) errorMsgEl.style.visibility = prevErrorVisibility || '';
   }
 });
 
-inputArea.addEventListener('input', ()=>{ saveState({ input: inputArea.value }); });
+inputArea.addEventListener('input', ()=>{ 
+  saveState({ input: inputArea.value }); 
+  updateButtonStates(); // Update button states on input change
+});
 
 // 載入先前狀態
 const prev = loadState();
@@ -295,5 +337,8 @@ if (prev && prev.input) {
   // rerun compute to restore UI; run after a short delay so DOM is ready
   setTimeout(()=>{ try{ parseAndCompute(); }catch(e){ console.warn('restore parse failed', e); } }, 50);
 }
+
+// Initialize button states on page load
+updateButtonStates();
 
 export { };
