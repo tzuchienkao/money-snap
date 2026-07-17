@@ -1,8 +1,24 @@
 {
   "name": "money-snap",
-  "version": "1.0.0",
-  "description": "薪資現金小幫手 - MVP",
-  "private": true,
+  "version": "0.1.0",
+  "description": "幫你算兌 Money Snap - 兌幣計算機 (MVP)",
+  "license": "MIT",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/money-snap.git"
+  },
+  "keywords": [
+    "salary",
+    "cash",
+    "denomination",
+    "calculator",
+    "taiwan"
+  ],
+  "authors": [
+    "agnes-kao <agneskao076@gmail.com>",
+    "tzuchienkao <oyan114@gmail.com>"
+  ],
   "scripts": {
     "start": "lite-server --baseDir=. --open=./index.html",
     "test": "node tests/test.mjs && node tests/sample_test.mjs"
