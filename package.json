@@ -1,0 +1,13 @@
+{
+  "name": "money-snap",
+  "version": "1.0.0",
+  "description": "薪資現金小幫手 - MVP",
+  "private": true,
+  "scripts": {
+    "start": "lite-server --baseDir=. --open=./index.html",
+    "test": "node tests/test.mjs && node tests/sample_test.mjs"
+  },
+  "devDependencies": {
+    "lite-server": "^2.6.1"
+  }
+}
