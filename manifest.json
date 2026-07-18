@@ -1,0 +1,23 @@
+{
+  "name": "幫你算兌 Money Snap - 兌幣計算機",
+  "short_name": "Money Snap",
+  "description": "本地端安全兌幣計算機，保護您的個資。",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f3f4f6",
+  "icons": [
+    {
+      "src": "icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
