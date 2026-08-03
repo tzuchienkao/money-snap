@@ -9,3 +9,5 @@ future: true
 
 # 網址格式設定
 permalink: /:year/:month/:day/:title.html
+
+timezone: Asia/Taipei
