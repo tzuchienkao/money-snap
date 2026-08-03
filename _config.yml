@@ -4,8 +4,8 @@ baseurl: "/money-snap"
 url: "https://tzuchienkao.github.io"
 timezone: Asia/Taipei
 
-# title: 幫你算兌 Money Snap - 開發筆記
-# description: 紀錄與 AI 協作開發產品的生命週期與思考過程
+title: 幫你算兌 Money Snap - 開發筆記
+description: 紀錄與 AI 協作開發產品的生命週期與思考過程
 
 # 網址格式設定
 permalink: /:year/:month/:day/:title.html
