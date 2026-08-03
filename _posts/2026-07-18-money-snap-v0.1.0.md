@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "我花了 12 個小時，和 AI 一起完成了一個產品 ── Money Snap"
-date: 2026-08-03 10:00:00 +0800
+date: 2026-07-18 10:00:00 +0800
 categories: [Product Development, AI Workflow]
 tags: [Money Snap, Gemini, ChatGPT, Copilot CLI, Side Project]
 description: "一個協助現金拆鈔、兌幣與統計的小工具，以及我與 AI 協作的 12 小時完整生命週期紀錄。"
