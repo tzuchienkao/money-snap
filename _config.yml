@@ -1,5 +1,5 @@
 # 選擇 Jekyll 預設主題 (推薦 minima，簡潔適合閱讀)
-theme: minima
+theme: jekyll-theme-primer
 baseurl: "/money-snap"
 url: "https://tzuchienkao.github.io"
 timezone: Asia/Taipei
