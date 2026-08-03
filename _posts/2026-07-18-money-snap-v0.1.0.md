@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: post
 title: "我花了 12 個小時，和 AI 一起完成了一個產品 ── Money Snap"
 date: 2026-07-18
 categories: [Product Development, AI Workflow]
