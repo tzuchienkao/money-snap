@@ -8,7 +8,7 @@ description: "一個協助現金拆鈔、兌幣與統計的小工具，以及我
 ---
 
 <style>
-  .site-header, markdown-body > h1 { display: none !important; }
+  .site-header { display: none !important; }
 </style>
 
 # 我花了 12 個小時，和 AI 一起完成了一個產品
