@@ -1,4 +1,5 @@
 ---
+layout: null
 title: "我花了 12 個小時，和 AI 一起完成了一個產品 ── Money Snap"
 date: 2026-07-17
 categories: [Product Development, AI Workflow]
