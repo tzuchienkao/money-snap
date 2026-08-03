@@ -1,13 +1,20 @@
-title: 我的產品開發筆記 (Product Dev Log)
-description: 紀錄與 AI 協作開發產品的生命週期與思考過程
-baseurl: "/money-snap"
+# title: 我的產品開發筆記 (Product Dev Log)
+# description: 紀錄與 AI 協作開發產品的生命週期與思考過程
+baseurl: "/money-snap/2026/07/18/money-snap-v0.1.0.html"
 url: "https://tzuchienkao.github.io"
 
 # 選擇 Jekyll 預設主題 (推薦 minima，簡潔適合閱讀)
-theme: minima
+theme: jekyll-theme-primer
 future: true
 
 # 網址格式設定
 permalink: /:year/:month/:day/:title.html
 
-timezone: Asia/Taipei
+# 外掛設定
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+# Markdown 渲染設定 (預設即支援程式碼高亮與 Mermaid 樣式)
+markdown: kramdown
+highlighter: rouge
