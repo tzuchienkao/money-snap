@@ -5,6 +5,7 @@ url: "https://tzuchienkao.github.io"
 
 # 選擇 Jekyll 預設主題 (推薦 minima，簡潔適合閱讀)
 theme: minima
+future: true
 
 # 外掛設定
 plugins:
