@@ -7,11 +7,5 @@ url: "https://tzuchienkao.github.io"
 theme: minima
 future: true
 
-# 外掛設定
-plugins:
-  - jekyll-feed
-  - jekyll-seo-tag
-
-# Markdown 渲染設定 (預設即支援程式碼高亮與 Mermaid 樣式)
-markdown: kramdown
-highlighter: rouge
+# 網址格式設定
+permalink: /:year/:month/:day/:title.html
