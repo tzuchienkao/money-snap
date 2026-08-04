@@ -20,5 +20,4 @@ plugins:
 markdown: kramdown
 highlighter: rouge
 
-jekyll:
-  environment: production
+google_analytics: G-QQS090P1KE
