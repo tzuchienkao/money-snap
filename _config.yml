@@ -19,3 +19,6 @@ plugins:
 # Markdown 渲染設定 (預設即支援程式碼高亮與 Mermaid 樣式)
 markdown: kramdown
 highlighter: rouge
+
+jekyll:
+  environment: production
