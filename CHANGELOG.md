@@ -7,9 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-07-17
+## [0.1.0] - 2026-07-18
 
 ### Added
+- 支援 PWA (Progressive Web App)，可安裝至桌面與手機並支援離線使用
+- 新增 Web App Manifest (`manifest.json`)，設定應用程式名稱、獨立視窗模式與主題色彩
+- 新增應用程式圖標（192x192, 512x512 遮罩式與一般圖標）
+- 實作 Service Worker (`sw.js`)，採用 Cache-First 快取策略支援離線存取與自動更新
+
+### Technical
+- 於 `app.js` 整合 Service Worker 註冊邏輯與離線狀態管理
+
+## [0.0.1] - 2026-07-17
+
+### Added
+- 專案初始化
+- 基礎解析器（parser.js）
+- 資料聚合器（aggregator.js）
+- 面額拆解邏輯（denomination.js）
+- 銀行統計邏輯（bank.js）
+- 測試套件（Mocha + Chai）
+- 基本 UI 介面
 - 初始 MVP 版本釋出
 - 支援從試算表貼上資料（Tab 分隔）
 - 支援手動輸入（逗號分隔，全形/半形皆可）
@@ -43,17 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 - 修復 BigInt 無法儲存到 localStorage 問題
 - 修復重整後時間戳更新為當前時間的問題
 - 修復輸入修改後過期狀態未清除的問題
-
-## [0.0.1] - 2026-07-17
-
-### Added
-- 專案初始化
-- 基礎解析器（parser.js）
-- 資料聚合器（aggregator.js）
-- 面額拆解邏輯（denomination.js）
-- 銀行統計邏輯（bank.js）
-- 測試套件（Mocha + Chai）
-- 基本 UI 介面
 
 ---
 

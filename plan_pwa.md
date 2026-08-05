@@ -1,5 +1,11 @@
 # 幫你算兌 Money Snap - PWA 開發計畫
 
+---
+status: completed
+version: 0.1.0
+completed_date: 2026-07-18
+---
+
 ## 1. 目標概述
 將「幫你算兌 Money Snap」升級為 Progressive Web App (PWA)，提供離線使用能力、案頭/手機安裝功能，並維持「零外部請求」與「資安隔離」的核心原則。
 
@@ -45,8 +51,8 @@
 - **嚴格限制**：Service Worker 不得包含 any `fetch` 到非快取名單內的外部位址。
 - **一致性**：確保 PWA 狀態下的數據仍只存放在本地 `localStorage`，不與雲端同步。
 
-## 5. 待辦事項 (Pending)
-- [ ] 產出圖標圖檔 (192, 512)。
-- [ ] 撰寫 `manifest.json`。
-- [ ] 撰寫 `sw.js`。
-- [ ] 整合註冊代碼至 `app.js`。
+## 5. 實作檢核表 (Checklist)
+- [x] 產出圖標圖檔 (192x192, 512x512)。
+- [x] 撰寫 `manifest.json`。
+- [x] 撰寫 `sw.js`。
+- [x] 整合註冊代碼至 `./src/app.js`。
