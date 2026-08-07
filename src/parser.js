@@ -1,10 +1,16 @@
 // src/parser.js
-// 提供輸入解析功能：支援逗號與 Tab 分隔、多行、去除空白行、貨幣符號與千分位處理
-// Export: parseInput(text) -> { entries: [{name, amt}], inputSum, error: {line, raw, message} | null }
+// 提供輸入解析功能：支援雙模式解析（含姓名 / 純金額）、逗號與 Tab 分隔、多行、去除空白行、貨幣符號與千分位處理
+// Export: parseInput(text, hasNameFlag) -> { entries: [{name, amt}], inputSum, error: {line, raw, message} | null }
 
 import { MAX_ENTRIES, MAX_PER_ENTRY } from './config.js';
 
-export function parseInput(text) {
+/**
+ * 雙模式文本解析器
+ * @param {string} text - 輸入框原始文字
+ * @param {boolean} hasNameFlag - 是否包含姓名欄位（預設 true）
+ * @returns {{entries: Array<{name: string, amt: number|bigint}>, inputSum: number|bigint, error: {line: number, raw: string, message: string}|null}}
+ */
+export function parseInput(text, hasNameFlag = true) {
   if (typeof text !== 'string') {
     return { entries: [], inputSum: 0, error: { line: 0, raw: '', message: '輸入非字串' } };
   }
@@ -15,16 +21,28 @@ export function parseInput(text) {
   const entries = [];
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i];
-    // 找第一個欄位分隔符（Tab、半形逗號、全形逗號），避免把金額內的千分位逗號切開
-    const match = raw.match(/[\t,，]/);
-    if (!match) {
-      return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（需要姓名與金額）' } };
-    }
-    const idx = match.index;
-    const namePart = raw.slice(0, idx).trim();
-    const amtPart = raw.slice(idx + 1).trim();
-    if (!namePart || !amtPart) {
-      return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（姓名或金額為空）' } };
+    let namePart = '';
+    let amtPart = '';
+    
+    if (hasNameFlag) {
+      // 含姓名模式：找第一個欄位分隔符（Tab、半形逗號、全形逗號），避免把金額內的千分位逗號切開
+      const match = raw.match(/[\t,，]/);
+      if (!match) {
+        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（需要姓名與金額）' } };
+      }
+      const idx = match.index;
+      namePart = raw.slice(0, idx).trim();
+      amtPart = raw.slice(idx + 1).trim();
+      if (!namePart || !amtPart) {
+        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（姓名或金額為空）' } };
+      }
+    } else {
+      // 純金額模式：整行當作金額，姓名自動編號
+      namePart = `項目 #${i + 1}`;
+      amtPart = raw.trim();
+      if (!amtPart) {
+        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '金額為空' } };
+      }
     }
 
     // 金額容錯：移除貨幣符號、空白，保留千分位逗號以利後續清理
