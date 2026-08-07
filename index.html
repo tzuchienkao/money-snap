@@ -7,8 +7,8 @@
   <meta name="description" content="每月發薪換鈔算到頭痛？「幫你算兌 Money Snap - 兌幣計算機」讓你快速完成面額拆解！支援複製貼上多筆資料，即時產出銀行領款清單，免去人為計算錯誤。採用 100% 瀏覽器本地運算、無伺服器傳輸，確保財務數據絕對安全。">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#f3f4f6" />
-  <link rel="apple-touch-icon" href="assets/icons/icon-180x180.png" />
-  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/money-snap/assets/icons/icon-180x180.png" />
+  <link rel="icon" href="/money-snap/favicon.ico" sizes="any">
   <!-- Tailwind via CDN for rapid prototyping -->
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -147,12 +147,12 @@
     </section>
 
     <section class="mb-6" id="bankTotals">
-      <div class="flex justify-between items-center mb-2">
+      <div class="flex justify-between items-center mb-2 flex-wrap md:flex-nowrap">
         <h2 class="font-medium">銀行領款總需求</h2>
         <!-- 按鈕群組：一鍵複製與匯出圖片並排 -->
         <div class="flex gap-3">
-          <button id="copyBankBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>一鍵複製銀行領款單</button>
-          <button id="exportBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>匯出領款明細圖片</button>
+          <button id="copyBankBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>複製銀行領款單</button>
+          <button id="exportBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>匯出領款明細圖</button>
         </div>
       </div>
       <!-- 總金額與總筆數獨立一行 -->
@@ -188,9 +188,9 @@
   </div>
 
   <div class="max-w-4xl mx-auto -mb-12 text-center">
-    <img class="h-6 object-contain inline-block" src="/assets/images/miao_s.png" />
-    <img class="h-6 object-contain inline-block" src="/assets/images/hwa_s.png" />
-    <img class="h-6 object-contain inline-block" src="/assets/images/hey_s.png" />
+    <img class="h-6 object-contain inline-block" src="/money-snap/assets/images/miao_s.png" />
+    <img class="h-6 object-contain inline-block" src="/money-snap/assets/images/hwa_s.png" />
+    <img class="h-6 object-contain inline-block" src="/money-snap/assets/images/hey_s.png" />
   </div>
 
   <!-- Footer -->
