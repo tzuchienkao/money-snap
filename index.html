@@ -89,10 +89,18 @@
     </div>
 
     <section class="mb-6">
+      <!-- Dual-mode toggle checkbox -->
+      <div class="mb-3">
+        <label class="inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="hasNameFlag" class="mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" checked>
+          <span class="text-sm text-gray-700">貼上資料是否包含姓名欄位（取消勾選即可貼上純金額）</span>
+        </label>
+      </div>
+      
       <div id="limitsNotice" class="text-xs text-gray-600 mb-2" style="white-space: pre-line;">格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）
 注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。</div>
       <div class="flex justify-between items-center mb-2">
-        <label class="font-medium">請貼上資料（姓名,金額）：</label>
+        <label class="font-medium" id="inputLabel">請貼上資料（姓名,金額）：</label>
         <span id="calcTimestamp" class="text-xs text-gray-500"></span>
       </div>
       <textarea id="inputArea" rows="8" class="w-full border rounded p-2" placeholder="例如：

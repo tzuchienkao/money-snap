@@ -13,20 +13,49 @@ const errorMsg = document.getElementById('errorMsg');
 const tbody = document.getElementById('personRows');
 const limitsNoticeEl = document.getElementById('limitsNotice');
 const calcTimestampEl = document.getElementById('calcTimestamp');
+const hasNameFlagCheckbox = document.getElementById('hasNameFlag');
+const inputLabel = document.getElementById('inputLabel');
 
 const saveKey = 'money-snap:mvp:v1';
 
 // State variable to track if data is valid for export
 let isDataValidForExport = false;
 
-// render dynamic limits if element present
-if (limitsNoticeEl) {
-  try {
-    limitsNoticeEl.textContent = `格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）\n注意：每次最多可貼入 ${MAX_ENTRIES.toLocaleString()} 筆；每筆金額之整數部分上限為 ${MAX_PER_ENTRY.toLocaleString()}；姓名可重複多筆，系統會自動加總。`;
-  } catch (e) {
-    // ignore if config not available in this environment
+/**
+ * 動態更新 UI 提示文字根據模式切換
+ */
+function updateUIForMode() {
+  const hasNameFlag = hasNameFlagCheckbox.checked;
+  
+  if (hasNameFlag) {
+    // 含姓名模式
+    if (limitsNoticeEl) {
+      limitsNoticeEl.textContent = `格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）\n注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。`;
+    }
+    if (inputLabel) {
+      inputLabel.textContent = '請貼上資料（姓名,金額）：';
+    }
+    inputArea.placeholder = `例如：
+王小明,1200
+張三,300
+王小明,800`;
+  } else {
+    // 純金額模式
+    if (limitsNoticeEl) {
+      limitsNoticeEl.textContent = `格式：金額（每行一筆數字，姓名欄位系統自動編號為「項目 #1」、「項目 #2」...）\n注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999。`;
+    }
+    if (inputLabel) {
+      inputLabel.textContent = '請貼上資料（純金額）：';
+    }
+    inputArea.placeholder = `例如：
+45,800
+32000
+18500`;
   }
 }
+
+// 初始化時設定 UI
+updateUIForMode();
 
 /**
  * 安全地發送 GA 事件的輔助函式
@@ -176,7 +205,12 @@ function parseAndCompute() {
     updateButtonStates();
     return; 
   }
-  const result = parseInput(text);
+  
+  // 讀取模式開關狀態
+  const hasNameFlag = hasNameFlagCheckbox.checked;
+  
+  // 傳入 hasNameFlag 參數到 parser
+  const result = parseInput(text, hasNameFlag);
   if (result.error) {
     errorMsg.textContent = `第 ${result.error.line} 行錯誤：${result.error.message} （${result.error.raw}）`;
     // Auto-select (highlight) the error line
@@ -248,7 +282,8 @@ function parseAndCompute() {
       calcTimestamp: timeStr, // Store formatted timestamp
       parsedEntries: result.entries,
       bank: bank,
-      lastValid: valid
+      lastValid: valid,
+      hasNameFlag: hasNameFlag
     });
   } else {
     // Save invalid state without timestamp
@@ -257,7 +292,8 @@ function parseAndCompute() {
       lastParsedAt: new Date().toISOString(),
       parsedEntries: result.entries,
       bank: bank,
-      lastValid: valid
+      lastValid: valid,
+      hasNameFlag: hasNameFlag
     });
   }
 
@@ -276,6 +312,19 @@ clearBtn.addEventListener('click', () => {
   sendGaEvent('click_clear', '一鍵清除');
   clearAll();
 });
+
+// 模式切換 checkbox 事件
+hasNameFlagCheckbox.addEventListener('change', () => {
+  const hasNameFlag = hasNameFlagCheckbox.checked;
+  // 觸發 GA 事件：切換模式
+  sendGaEvent('toggle_name_mode', `hasNameFlag=${hasNameFlag}`);
+  // 更新 UI 提示
+  updateUIForMode();
+  // 清除錯誤訊息與高亮
+  errorMsg.textContent = '';
+  inputArea.classList.remove('error-highlight');
+});
+
 function formatDateForWatermark(d){
   const pad=(n)=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -408,6 +457,12 @@ inputArea.addEventListener('input', ()=>{
 const prev = loadState();
 if (prev && prev.input) {
   inputArea.value = prev.input;
+  
+  // Restore checkbox state if available
+  if (prev.hasOwnProperty('hasNameFlag')) {
+    hasNameFlagCheckbox.checked = prev.hasNameFlag;
+    updateUIForMode(); // Update UI based on restored mode
+  }
   
   // Restore UI from saved state if available
   if (prev.bank && prev.lastValid) {

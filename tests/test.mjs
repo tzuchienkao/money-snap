@@ -6,8 +6,8 @@ function toComparableBig(v){
   if (typeof v === 'bigint') return v;
   return BigInt(Math.round(Number(v) || 0));
 }
-function testParse(description, input, expected) {
-  const res = parseInput(input);
+function testParse(description, input, expected, hasNameFlag = true) {
+  const res = parseInput(input, hasNameFlag);
   if (expected.error) {
     assert(res.error, `${description} expected error`);
     assert.strictEqual(res.error.line, expected.error.line);
@@ -67,6 +67,62 @@ const resBig = parseInput(bigAmt);
 assert(resBig.error && /超過單筆上限/.test(resBig.error.message), '超過單筆金額應回傳錯誤');
 
 console.log('Parser tests passed.');
+
+// ===== 雙模式測試 =====
+console.log('Running dual-mode parser tests...');
+
+// 8. 純金額模式 - 單行
+testParse('純金額模式 - 單行', '45800', {
+  inputSum: 45800,
+  entries: [ { name: '項目 #1', amt: 45800 } ]
+}, false);
+
+// 9. 純金額模式 - 多行
+const pureAmountInput = '45800\n32000\n18500';
+const resPureAmount = parseInput(pureAmountInput, false);
+assert(!resPureAmount.error, '純金額模式多行應成功');
+assert.strictEqual(toComparableBig(resPureAmount.inputSum).toString(), '96300');
+assert.strictEqual(resPureAmount.entries.length, 3);
+assert.strictEqual(resPureAmount.entries[0].name, '項目 #1');
+assert.strictEqual(resPureAmount.entries[1].name, '項目 #2');
+assert.strictEqual(resPureAmount.entries[2].name, '項目 #3');
+
+// 10. 純金額模式 - 含千分位與貨幣符號
+const resPureWithComma = parseInput('$1,200\n¥2,500', false);
+assert(!resPureWithComma.error, '純金額模式應支援千分位與貨幣符號');
+assert.strictEqual(toComparableBig(resPureWithComma.inputSum).toString(), '3700');
+assert.strictEqual(resPureWithComma.entries[0].name, '項目 #1');
+assert.strictEqual(resPureWithComma.entries[1].name, '項目 #2');
+
+// 11. 純金額模式 - 負數
+const resPureNegative = parseInput('-100\n200', false);
+assert(!resPureNegative.error, '純金額模式應支援負數');
+assert.strictEqual(toComparableBig(resPureNegative.inputSum).toString(), '100');
+
+// 12. 純金額模式 - 小數
+const resPureDecimal = parseInput('123.45\n678.90', false);
+assert(!resPureDecimal.error, '純金額模式應支援小數');
+assert.strictEqual(Math.round(Number(resPureDecimal.inputSum)), 802);
+
+// 13. 純金額模式 - 錯誤格式（含文字）
+const resPureError = parseInput('100\nabc\n200', false);
+assert(resPureError.error, '純金額模式遇到非數字應回傳錯誤');
+assert.strictEqual(resPureError.error.line, 2, '錯誤行應為第2行');
+
+// 14. 純金額模式 - 空行過濾
+const resPureEmptyLines = parseInput('100\n\n200\n  \n300', false);
+assert(!resPureEmptyLines.error, '純金額模式應過濾空行');
+assert.strictEqual(resPureEmptyLines.entries.length, 3);
+assert.strictEqual(resPureEmptyLines.entries[0].name, '項目 #1');
+assert.strictEqual(resPureEmptyLines.entries[2].name, '項目 #3');
+
+// 15. 含姓名模式仍正常運作（確保向下相容）
+const resNameMode = parseInput('王小明,1200\n張三,300', true);
+assert(!resNameMode.error, '含姓名模式應正常運作');
+assert.strictEqual(resNameMode.entries[0].name, '王小明');
+assert.strictEqual(resNameMode.entries[1].name, '張三');
+
+console.log('Dual-mode parser tests passed.');
 
 console.log('Running aggregator tests...');
 
