@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-07
+
+### Added
+- 雙模式文本解析器：支援「含姓名模式」與「純金額模式」彈性切換
+- 新增 UI 切換開關：「貼上資料包含姓名欄位」checkbox，預設勾選
+- 純金額模式：每行僅需輸入數字，系統自動編號為「項目 #1」、「項目 #2」等
+- 一鍵複製銀行領款單功能：格式化純文字輸出，方便貼到 Excel 或記事本
+- 複製成功後顯示 Toast 提示訊息（2 秒後自動消失）
+- 動態格式說明：根據模式切換顯示不同的輸入提示文字
+
+### Enhanced
+- 強化雙重對帳機制：對帳失敗時顯示詳細差額資訊（輸入總額 vs 拆解總額）
+- 優化 GA4 事件追蹤：新增 `click_copy_bank`（複製銀行領款單）與 `toggle_name_mode`（切換姓名模式）事件
+- 改善錯誤訊息顯示：提供更明確的差額提示，協助人工核對
+
+### Technical
+- 更新 `parser.js`：新增 `hasNameFlag` 參數支援雙模式解析
+- 更新 `app.js`：整合模式切換邏輯與一鍵複製功能
+- 採用 Clipboard API (`navigator.clipboard.writeText`) 實現剪貼簿功能
+- 測試套件擴充：新增雙模式解析、邊界測試與容錯測試案例
+
+### Security & Privacy
+- 維持 100% 本地運算承諾，零數據外傳
+- GA 事件追蹤絕不包含 PII（個資）或業務數據
+- 複製功能僅處理本地格式化文字，不經過伺服器
+
 ## [0.1.0] - 2026-07-18
 
 ### Added
@@ -64,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ---
 
-[Unreleased]: https://github.com/your-repo/money-snap/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/your-repo/money-snap/releases/tag/v0.1.0
-[0.0.1]: https://github.com/your-repo/money-snap/releases/tag/v0.0.1
+[Unreleased]: https://github.com/tzuchienkao/money-snap/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.2.0
+[0.1.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.1.0
+[0.0.1]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.0.1

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'money-snap-v1';
+const CACHE_NAME = 'money-snap-v0.2.0';
 const ASSETS = [
   './',
   './index.html',
