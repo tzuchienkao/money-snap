@@ -41,6 +41,7 @@ function updateUIForMode() {
 王小明,1200
 張三,300
 王小明,800`;
+    inputArea.inputMode = ""
   } else {
     // 純金額模式
     if (limitsNoticeEl) {
@@ -53,6 +54,7 @@ function updateUIForMode() {
 45,800
 32000
 18500`;
+    inputArea.inputMode = "decimal"
   }
 }
 
