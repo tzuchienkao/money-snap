@@ -158,4 +158,104 @@ if (bank.totals[100] < 3) throw new Error('computeBankTotals incorrect totals');
 
 console.log('Denomination tests passed.');
 
+// ===== v0.4.0: Custom Denomination Configuration Tests =====
+console.log('Running v0.4.0 denomination config tests...');
+import { verifyDoubleEntry } from '../src/bank.js';
+
+// Test Case 1: 銀行 50 元硬幣短缺情境（取消 50 元）
+console.log('  Test 1: 銀行 50 元硬幣短缺情境...');
+const customDenom1 = [1000, 500, 100, 10, 5, 1]; // 取消 50 元
+const bd1 = breakdownAmount(185, customDenom1);
+assert.strictEqual(bd1.breakdown[100], 1, '應使用 1 張 100 元');
+assert.strictEqual(bd1.breakdown[10], 8, '應使用 8 個 10 元（原本 50 元×1 + 10 元×3 改為 10 元×8）');
+assert.strictEqual(bd1.breakdown[5], 1, '應使用 1 個 5 元');
+assert.strictEqual(bd1.breakdown[50], undefined, '不應包含 50 元');
+const total1 = 100 * 1 + 10 * 8 + 5 * 1;
+assert.strictEqual(total1, 185, '總和應為 185 元');
+console.log('  ✓ Test 1 passed');
+
+// Test Case 2: 排除 2000/200 元鈔票情境
+console.log('  Test 2: 排除 2000/200 元鈔票情境...');
+const customDenom2 = [1000, 500, 100, 50, 10, 5, 1]; // 取消 2000 與 200
+const bd2 = breakdownAmount(4400, customDenom2);
+assert.strictEqual(bd2.breakdown[1000], 4, '應使用 4 張 1000 元（不使用 2000 元）');
+assert.strictEqual(bd2.breakdown[100], 4, '應使用 4 張 100 元（不使用 200 元）');
+assert.strictEqual(bd2.breakdown[2000], undefined, '不應包含 2000 元');
+assert.strictEqual(bd2.breakdown[200], undefined, '不應包含 200 元');
+const total2 = 1000 * 4 + 100 * 4;
+assert.strictEqual(total2, 4400, '總和應為 4400 元');
+console.log('  ✓ Test 2 passed');
+
+// Test Case 3: 彈性面額拆解（排除多種面額）
+console.log('  Test 3: 彈性面額拆解（排除多種面額）...');
+const customDenom3 = [1000, 100, 10, 1]; // 僅保留 4 種面額
+const bd3 = breakdownAmount(1366, customDenom3);
+assert.strictEqual(bd3.breakdown[1000], 1, '應使用 1 張 1000 元');
+assert.strictEqual(bd3.breakdown[100], 3, '應使用 3 張 100 元');
+assert.strictEqual(bd3.breakdown[10], 6, '應使用 6 個 10 元');
+assert.strictEqual(bd3.breakdown[1], 6, '應使用 6 個 1 元');
+const total3 = 1000 * 1 + 100 * 3 + 10 * 6 + 1 * 6;
+assert.strictEqual(total3, 1366, '總和應為 1366 元');
+console.log('  ✓ Test 3 passed');
+
+// Test Case 4: 防呆檢查 - 空陣列應拋出錯誤
+console.log('  Test 4: 防呆檢查 - 空陣列應拋出錯誤...');
+try {
+  breakdownAmount(100, []);
+  throw new Error('空陣列應拋出錯誤');
+} catch (e) {
+  assert.strictEqual(e.message.includes('請至少選擇一種有效面額'), true, '錯誤訊息應包含提示');
+}
+console.log('  ✓ Test 4 passed');
+
+// Test Case 5: 殘額檢查 - 無 1 元導致殘額
+console.log('  Test 5: 殘額檢查 - 無 1 元導致殘額...');
+const customDenom5 = [1000, 100, 10]; // 無 1 元
+const bd5 = breakdownAmount(1366, customDenom5);
+assert(bd5.remainder > 0, '應有殘額（無法完全拆解）');
+assert.strictEqual(bd5.remainder, 6, '殘額應為 6 元');
+console.log('  ✓ Test 5 passed');
+
+// Test Case 6: 雙重對帳驗證 - 成功情境
+console.log('  Test 6: 雙重對帳驗證 - 成功情境...');
+const result6 = verifyDoubleEntry(1000n, 1000n);
+assert.strictEqual(result6, true, '相同金額應驗證通過');
+console.log('  ✓ Test 6 passed');
+
+// Test Case 7: 雙重對帳驗證 - 失敗情境
+console.log('  Test 7: 雙重對帳驗證 - 失敗情境...');
+try {
+  verifyDoubleEntry(1000n, 995n);
+  throw new Error('金額不符應拋出錯誤');
+} catch (e) {
+  assert(e.message.includes('財務嚴重警告'), '錯誤訊息應包含財務警告');
+  assert(e.message.includes('差額'), '錯誤訊息應包含差額資訊');
+}
+console.log('  ✓ Test 7 passed');
+
+// Test Case 8: computeBankTotals 使用彈性面額
+console.log('  Test 8: computeBankTotals 使用彈性面額...');
+const customDenom8 = [1000, 500, 100, 10, 5, 1]; // 排除 50 元
+const people8 = [ { name: '張三', total: 185 } ];
+const bank8 = computeBankTotals(people8, customDenom8);
+assert.strictEqual(bank8.totals[100], 1, '應使用 1 張 100 元');
+assert.strictEqual(bank8.totals[10], 8, '應使用 8 個 10 元');
+assert.strictEqual(bank8.totals[5], 1, '應使用 1 個 5 元');
+assert.strictEqual(bank8.totals[50], undefined, '50 元不在啟用面額中，應為 undefined');
+assert.strictEqual(Number(bank8.totalAmount), 185, '總金額應為 185 元');
+console.log('  ✓ Test 8 passed');
+
+// Test Case 9: aggregateBreakdowns 使用彈性面額
+console.log('  Test 9: aggregateBreakdowns 使用彈性面額...');
+const customDenom9 = [1000, 100, 10, 1];
+const bd9a = breakdownAmount(1200, customDenom9);
+const bd9b = breakdownAmount(300, customDenom9);
+const agg9 = aggregateBreakdowns([bd9a.breakdown, bd9b.breakdown], customDenom9);
+assert.strictEqual(agg9.totals[1000], 1, '總計應有 1 張 1000 元');
+assert.strictEqual(agg9.totals[100], 5, '總計應有 5 張 100 元');
+assert.strictEqual(Number(agg9.totalAmount), 1500, '總金額應為 1500 元');
+console.log('  ✓ Test 9 passed');
+
+console.log('v0.4.0 denomination config tests passed.');
+
 console.log('All tests passed.');

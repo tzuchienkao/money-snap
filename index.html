@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>幫你算兌 Money Snap - 兌幣計算機 v0.3.0</title>
+  <title>幫你算兌 Money Snap - 兌幣計算機 v0.4.0</title>
   <meta name="description" content="每月發薪換鈔算到頭痛？「幫你算兌 Money Snap - 兌幣計算機」讓你快速完成面額拆解！支援複製貼上多筆資料，即時產出銀行領款清單，免去人為計算錯誤。採用 100% 瀏覽器本地運算、無伺服器傳輸，確保財務數據絕對安全。">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#f3f4f6" />
@@ -121,17 +121,17 @@
       <h1 class="text-2xl font-semibold">幫你算兌 Money Snap - 兌幣計算機</h1>
     </div>
 
-    <section class="mb-6">
+    <section class="mb-8">
       <!-- Dual-mode toggle checkbox -->
-      <div class="mb-3">
+      <div class="mb-2">
         <label class="inline-flex items-center cursor-pointer">
           <input type="checkbox" id="hasNameFlag" class="mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" checked>
-          <span class="text-sm text-gray-700">貼上資料是否包含姓名欄位（取消勾選即可貼上純金額）</span>
+          <span>貼上資料是否包含姓名欄位（取消勾選即可貼上純金額）</span>
         </label>
       </div>
       
       <!-- CSV file import & sample download buttons -->
-      <div class="mb-3 flex gap-2 items-center flex-wrap">
+      <div class="mx-6 mb-2 flex gap-2 items-center flex-wrap" id="csvButtonsSection">
         <button id="csvImportBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded transition-colors inline-flex items-center justify-center gap-1.5 text-sm basis-full md:basis-auto">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -149,7 +149,7 @@
       </div>
       
       <!-- CSV format hint -->
-      <div class="mb-3 bg-blue-50 border border-blue-200 rounded p-2 text-xs text-gray-700">
+      <div class="mx-6 mb-4 py-2 text-xs text-gray-700" id="csvFormatHint">
         <div class="flex items-start">
           <span class="mr-1">💡</span>
           <div>
@@ -160,9 +160,7 @@
           </div>
         </div>
       </div>
-      
-      <div id="limitsNotice" class="text-xs text-gray-600 mb-2" style="white-space: pre-line;">格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）
-注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。</div>
+
       <div class="flex justify-between items-center mb-2 flex-wrap md:flex-nowrap">
         <div class="flex items-baseline gap-2 flex-wrap md:flex-nowrap">
           <label class="font-medium" id="inputLabel">請貼上資料（姓名,金額）：</label>
@@ -170,33 +168,132 @@
         </div>
         <span id="calcTimestamp" class="text-xs text-gray-500"></span>
       </div>
+      
+      <div id="limitsNotice" class="text-xs text-gray-600 mb-2" style="white-space: pre-line;">格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）
+注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。</div>
       <textarea id="inputArea" rows="8" class="w-full border rounded p-2" placeholder="例如：
 王小明,1200
 張三,300
 王小明,800"></textarea>
       
-      <!-- Error message below textarea -->
-      <div id="errorMsg" class="mt-2 text-red-600 font-semibold"></div>
+      <div class="my-4" id="denomSwitchSection">
+        <!-- Master Switch Checkbox -->
+        <label class="inline-flex items-center cursor-pointer mb-2">
+          <input type="checkbox" id="enableCustomDenom" class="mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
+          <span>啟用自訂面額設定</span>
+        </label>
+        
+        <!-- Default Denomination Hint (Visible when switch is OFF) -->
+        <div id="defaultDenomHint" class="mx-6">
+          已啟用預設面額：1000, 500, 100, 50, 10, 5, 1
+        </div>
+      </div>
+
+      <!-- Denomination Configuration Panel (v0.4.0) -->
+      <div class="px-6" id="denomPanelSection">
+        <!-- Panel Content (Visible when switch is ON) -->
+        <div id="denomPanelContent" class="hidden -mt-4">
+          <!-- Bills Section -->
+          <div class="mb-4">
+            <div class="flex items-center mb-2">
+              <label class="text-sm font-medium text-gray-700">紙鈔面額：</label>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="billsSelectAll" class="mr-1 w-3.5 h-3.5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
+                <span>全選</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom2000" class="denom-checkbox denom-bill mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="2000">
+                <span class="text-sm">$2000</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom1000" class="denom-checkbox denom-bill mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="1000" checked>
+                <span class="text-sm">$1000</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom500" class="denom-checkbox denom-bill mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="500" checked>
+                <span class="text-sm">$500</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom200" class="denom-checkbox denom-bill mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="200">
+                <span class="text-sm">$200</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom100" class="denom-checkbox denom-bill mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="100" checked>
+                <span class="text-sm">$100</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Coins Section -->
+          <div class="mb-4">
+            <div class="flex items-center mb-2">
+              <label class="text-sm font-medium text-gray-700">硬幣面額：</label>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="coinsSelectAll" class="mr-1 w-3.5 h-3.5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
+                <span>全選</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom50" class="denom-checkbox denom-coin mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="50" checked>
+                <span class="text-sm">$50</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom20" class="denom-checkbox denom-coin mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="20">
+                <span class="text-sm">$20</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom10" class="denom-checkbox denom-coin mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="10" checked>
+                <span class="text-sm">$10</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom5" class="denom-checkbox denom-coin mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="5" checked>
+                <span class="text-sm">$5</span>
+              </label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="denom1" class="denom-checkbox denom-coin mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="1" checked>
+                <span class="text-sm">$1 <span class="text-xs text-gray-500">(建議保留)</span></span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Save Preference -->
+          <div class="pt-3 border-t border-gray-200">
+            <label class="inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="saveDenomPreference" class="mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
+              <span class="text-sm text-gray-700">記住我的面額偏好（儲存至此瀏覽器）</span>
+            </label>
+          </div>
+        </div>
+      </div>
       
       <!-- Control buttons below textarea - space-between alignment -->
-      <div class="mt-3 flex items-center justify-between">
-        <button id="clearBtn" class="bg-red-500 text-white px-3 py-1 rounded">清除所有資料</button>
-        <button id="calcBtn" class="bg-blue-600 text-white px-3 py-1 rounded">點我才兌</button>
+      <div class="mt-8 flex items-center justify-between">
+        <button id="clearBtn" class="bg-red-500 text-white px-4 py-2 rounded">清除所有資料</button>
+        <button id="calcBtn" class="bg-blue-600 text-white px-4 py-2 rounded">點我才兌</button>
       </div>
+
+      <!-- Error message below textarea -->
+      <div id="errorMsg" class="mt-2 mb-8 text-red-600 font-semibold"></div>
     </section>
 
-    <section class="mb-6" id="bankTotals">
+    <section class="mb-8 pt-8 border-t border-gray-200" id="bankTotals">
       <h2 class="font-medium mb-2">銀行領款總需求</h2>
       <!-- 總金額與總筆數獨立一行 -->
-      <div class="mb-3">
+      <div class="mb-4">
         總金額：<span id="totalAmount">0</span> 元 | 總筆數：<span id="totalCount">0</span> 筆
       </div>
-      <!-- 面額明細 -->
-      <div class="grid grid-cols-4 gap-2 text-sm mb-3">
+      <!-- 面額明細 (v0.4.0: 支援全部 10 種面額) -->
+      <div class="grid grid-cols-4 gap-2 text-sm mb-4">
+        <div>2000元：<span id="d2000">0</span> 張</div>
         <div>1000元：<span id="d1000">0</span> 張</div>
         <div>500元：<span id="d500">0</span> 張</div>
+        <div>200元：<span id="d200">0</span> 張</div>
         <div>100元：<span id="d100">0</span> 張</div>
-        <div>50元：<span id="d50">0</span> 張</div>
+        <div>50元：<span id="d50">0</span> 個</div>
+        <div>20元：<span id="d20">0</span> 個</div>
         <div>10元：<span id="d10">0</span> 個</div>
         <div>5元：<span id="d5">0</span> 個</div>
         <div>1元：<span id="d1">0</span> 個</div>
@@ -210,7 +307,7 @@
         <tbody id="personRows"></tbody>
       </table>
       
-      <div class="mt-3 flex justify-center gap-2 flex-wrap md:flex-nowrap">
+      <div class="mt-4 flex justify-center gap-2 flex-wrap md:flex-nowrap">
         <button id="copyBankBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>複製銀行領款單</button>
         <button id="exportBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>匯出領款明細圖</button>
         <button id="exportCsvBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>
@@ -221,8 +318,8 @@
   </div>
 
   <!-- Disclaimer -->
-  <div class="max-w-4xl mx-auto mt-4 bg-gray-50 rounded p-3 text-xs text-gray-600">
-    <p class="font-semibold text-gray-700 mb-1">⚠️ 免責與隱私聲明</p>
+  <div class="max-w-4xl mx-auto mt-4 bg-gray-50 rounded p-4 text-xs text-gray-600">
+    <p class="font-semibold text-gray-700 mb-2">⚠️ 免責與隱私聲明</p>
     <p class="mb-1">1. 本工具提供的計算結果僅供參考，實際金額與面額組合請以人工核對為準。使用本工具所產生之任何結果，使用者需自行承擔相關責任。開發團隊不對計算錯誤或資料遺失負責。</p>
     <p>2. 本站使用 Google Analytics 進行不具名流量統計，絕不收集、傳輸或儲存任何使用者輸入之業務敏感資料。</p>
   </div>
@@ -235,13 +332,13 @@
 
   <!-- Footer -->
   <footer class="max-w-4xl mx-auto mt-12 pt-4 border-t border-gray-200 text-xs text-gray-600">
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
       <p>© 2026 Money Snap · 開發者：tzuchienkao</p>
       <p>本專案採用 <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener" class="text-blue-600 hover:underline">MIT License</a> 開源授權</p>
     </div>
     
     <div class="text-center text-gray-500">
-      <p>Version 0.3.0 · 最後更新：2026-08-09</p>
+      <p>Version 0.4.0 · 最後更新：2026-08-09</p>
     </div>
   </footer>
 
