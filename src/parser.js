@@ -5,10 +5,56 @@
 import { MAX_ENTRIES, MAX_PER_ENTRY } from './config.js';
 
 /**
+ * @typedef {Object} ParsedEntry
+ * @property {string} name - 姓名或項目編號
+ * @property {number|bigint} amt - 金額（整數用 BigInt，小數用 Number）
+ */
+
+/**
+ * @typedef {Object} ParseError
+ * @property {number} line - 錯誤發生的行號（1-based）
+ * @property {string} raw - 原始輸入行內容
+ * @property {string} message - 錯誤訊息
+ */
+
+/**
+ * @typedef {Object} ParseResult
+ * @property {ParsedEntry[]} entries - 解析成功的項目陣列
+ * @property {number|bigint} inputSum - 所有金額的總和
+ * @property {ParseError|null} error - 錯誤物件，無錯誤時為 null
+ */
+
+/**
  * 雙模式文本解析器
- * @param {string} text - 輸入框原始文字
- * @param {boolean} hasNameFlag - 是否包含姓名欄位（預設 true）
- * @returns {{entries: Array<{name: string, amt: number|bigint}>, inputSum: number|bigint, error: {line: number, raw: string, message: string}|null}}
+ * 
+ * 支援兩種模式：
+ * - 含姓名模式（hasNameFlag = true）：每行格式為「姓名,金額」或「姓名\t金額」
+ * - 純金額模式（hasNameFlag = false）：每行僅包含金額，系統自動編號為「項目 #1」、「項目 #2」...
+ * 
+ * 容錯處理：
+ * - 自動清除貨幣符號（$、¥、€、￡）
+ * - 支援千分位逗號（半形、全形）
+ * - 支援 Tab、半形逗號、全形逗號作為分隔符
+ * - 過濾空白行
+ * - 支援負數和小數
+ * 
+ * 限制：
+ * - 最多 {@link MAX_ENTRIES} 筆資料
+ * - 單筆金額整數部分不超過 {@link MAX_PER_ENTRY}
+ * 
+ * @param {string} text - 輸入框原始文字（多行文本）
+ * @param {boolean} [hasNameFlag=true] - 是否包含姓名欄位
+ * @returns {ParseResult} 解析結果物件
+ * 
+ * @example
+ * // 含姓名模式
+ * parseInput("王小明,1200\n張三,300", true)
+ * // => { entries: [{name:"王小明",amt:1200n},{name:"張三",amt:300n}], inputSum:1500n, error:null }
+ * 
+ * @example
+ * // 純金額模式
+ * parseInput("1200\n300", false)
+ * // => { entries: [{name:"項目 #1",amt:1200n},{name:"項目 #2",amt:300n}], inputSum:1500n, error:null }
  */
 export function parseInput(text, hasNameFlag = true) {
   if (typeof text !== 'string') {
