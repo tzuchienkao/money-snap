@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-09
+
+### Fixed
+- **驗證失敗不顯示結果**：當雙重對帳驗證失敗（輸入總額與拆解總金額不符）時，清空銀行領款總需求和個人領現明細，避免顯示錯誤的計算結果
+
+### Changed
+- **UI 互動模式調整**：自訂面額設定改為主開關 checkbox 控制模式
+  - 情境 A（關閉）：顯示「已啟用預設面額：1000, 500, 100, 50, 10, 5, 1」提示，隱藏面額設定面板
+  - 情境 B（開啟）：顯示完整面額設定面板，允許自訂面額組合
+  - 主開關狀態儲存至 localStorage，下次開啟時自動恢復
+  - 移除舊版可折疊面板按鈕機制
+- **GA4 事件規範更新**：
+  - 事件名稱調整：`click_toggle_denom_panel` → `toggle_custom_denom_switch`
+  - 新增獨立事件：`click_select_all_paper`（紙鈔全選）、`click_select_all_coin`（硬幣全選）
+  - 參數格式改為物件格式（如 `{denom_value: 1000, active: true}`），符合 GA4 最佳實踐
+
+### Added
+- **自訂面額設定功能**：新增可折疊的「⚙️ 自訂面額設定」面板
+  - 支援 10 種台幣流通面額：2000/1000/500/200/100（紙鈔）+ 50/20/10/5/1（硬幣）
+  - 預設啟用 7 種面額（1000/500/100/50/10/5/1），排除罕見的 2000/200/20 元
+  - 面板預設收合，收合時顯示「已啟用的面額」摘要文字
+  - 紙鈔/硬幣各有獨立「全選」checkbox 簡化批次操作
+  - 1 元面額標示「建議保留」提示
+  - 「記住我的面額偏好」功能，儲存至瀏覽器 localStorage（key: `money_snap_denom_config_v4`）
+- **彈性貪婪面額拆解演算法**：支援動態面額陣列
+  - 當銀行特定面額短缺時（如 50 元硬幣），系統自動改用其他小面額遞補
+  - 支援排除罕見或不合宜鈔幣（如 2000 元、200 元紙鈔）
+  - 防呆機制：至少保留一種面額，否則跳出警告阻止空選
+  - 殘額檢查：若自訂面額無法完全拆解（如缺少 1 元），發出 console.warn 警告
+- **強化雙重對帳驗證機制**：新增 `verifyDoubleEntry()` 函式
+  - 確保輸入總額 = 面額拆解總額（防止面額設定錯誤導致差額）
+  - 對帳失敗時顯示詳細差額資訊與明確錯誤訊息
+  - 建議檢查是否漏選 1 元面額
+- **銀行領款總需求顯示擴充**：新增 2000/200/20 元面額顯示（共 10 種）
+- 新增 `src/denomination-config.js` 模組專責面額設定管理
+  - 提供 `loadDenomConfig()`、`saveDenomConfig()`、`getActiveDenominations()` 等 API
+  - 支援 localStorage 持久化與容錯機制
+
+### Enhanced
+- **面額拆解模組升級**（`src/denomination.js`）：
+  - `breakdownAmount()` 支援彈性面額陣列參數
+  - 強制由大至小排序，確保貪婪演算法正確運作
+  - 防呆檢查：空陣列拋出錯誤「請至少選擇一種有效面額進行計算！」
+  - 殘額檢查：remainder > 0 時發出 console.warn 警告
+  - 更新 JSDoc 註解說明彈性面額用法與 v0.4.0 新增功能
+- **銀行計算模組升級**（`src/bank.js`）：
+  - `computeBankTotals()` 接收動態 denominations 參數
+  - 整合雙重對帳驗證邏輯至主計算流程
+  - Export `verifyDoubleEntry()` 供外部呼叫
+- **主應用程式整合**（`src/app.js`）：
+  - 匯入 denomination-config 模組
+  - 監聽面額 checkbox 變更事件，即時更新內部設定與 UI 摘要
+  - 監聽紙鈔/硬幣「全選」checkbox，批次切換該類別所有面額
+  - 防空選機制：至少保留一個面額，否則跳出 Toast 提示並阻止操作
+  - 計算時傳入當前啟用面額至 `computeBankTotals()`
+  - 動態更新所有 10 種面額顯示（未啟用面額顯示 0）
+  - 狀態持久化：面額設定變更時若啟用「記住偏好」則自動儲存
+
+### GA4 Events
+- `click_toggle_denom_panel`：展開/收合面額面板（參數: `status: 'open'|'close'`）
+- `change_custom_denomination`：勾選/取消特定面額（參數: `denom_value: number, active: boolean`）
+- `toggle_save_denom_preference`：切換「記住偏好」（參數: `enabled: boolean`）
+
+### Technical
+- 新增 9 個 v0.4.0 測試案例（`tests/test.mjs`）：
+  - 銀行 50 元硬幣短缺情境
+  - 排除 2000/200 元鈔票情境
+  - 彈性面額拆解（排除多種面額）
+  - 防呆檢查（空陣列拋錯）
+  - 殘額檢查（無 1 元導致殘額）
+  - 雙重對帳驗證（成功/失敗情境）
+  - `computeBankTotals` 使用彈性面額
+  - `aggregateBreakdowns` 使用彈性面額
+- 所有測試案例通過（npm test）
+- localStorage key 更新為 `money_snap_denom_config_v4`
+- UI 使用 Tailwind CSS 樣式確保與現有介面一致
+
+### Security & Privacy
+- 維持 100% 本地運算承諾，面額設定完全於瀏覽器執行
+- localStorage 僅儲存面額設定（無敏感資料）
+- GA4 僅追蹤動作（面額值、開關狀態），不含金額或姓名數據
+
+### Documentation
+- 更新 `index.html`：版本號至 v0.4.0
+- 更新 CHANGELOG.md：新增 [0.4.0] 版本記錄
+- 所有模組 JSDoc 註解完整標註 v0.4.0 新增功能
+- 計劃文件：`plan_v0.4.0.md`（已儲存至 session 資料夾）
+
 ## [0.3.0] - 2026-08-09
 
 ### Added
@@ -163,7 +251,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ---
 
-[Unreleased]: https://github.com/tzuchienkao/money-snap/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/tzuchienkao/money-snap/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.1.0
