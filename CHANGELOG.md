@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-09
+
+### Added
+- **CSV 匯入功能**：整合 PapaParse v5.4.1，支援上傳 CSV 檔案快速匯入資料
+  - 自動處理千分位逗號（如 45,800）
+  - 自動清除貨幣符號（如 $32,000）
+  - 完美支援 RFC 4180 規範（處理雙引號與特殊字元）
+  - 自動跳過表頭列（如「姓名」、「金額」等關鍵字）
+  - 同名自動加總
+  - 雙模式支援（含姓名/純金額）
+- **CSV 範例下載**：一鍵下載標準格式範例檔（UTF-8 BOM）
+  - 包含表頭與 3 筆範例資料
+  - 確保 Windows/Mac Excel 開啟無亂碼
+- **CSV 匯出功能**：將計算結果匯出為標準 CSV 檔案
+  - 包含個人明細列與總計列
+  - 動態檔名（MoneySnap_面額明細_YYYYMMDD.csv）
+  - UTF-8 BOM 編碼確保無亂碼
+- 新增 `src/csv.js` 模組專責 CSV 功能
+- 新增 CSV 相關 UI 元素（匯入按鈕、範例下載按鈕、匯出按鈕）
+- 新增 CSV 格式小提示區塊
+
+### Enhanced
+- **CSV 驗證對齊手動輸入規則**：
+  - 最多匯入 1000 筆資料（與手動輸入限制一致）
+  - 單筆金額上限 999,999（六位數，與手動輸入限制一致）
+  - 詳細錯誤訊息顯示行號、原始值與姓名
+- **CSV 匯入來源標籤**：匯入成功後在輸入框 label 旁顯示「資料來源由 {filename} 匯入」
+- **CSV 範例檔案格式修正**：金額包含千分位時用雙引號包住（如："45,800"），避免被誤判為欄位分隔符
+- **CSV 格式提示優化**：更新小提示文字，明確說明包含千分位的金額需用雙引號包住
+- 強化錯誤處理機制：
+  - 檔案類型驗證（僅接受 .csv）
+  - 檔案大小限制（1MB 上限）
+  - 空檔案檢測
+  - 無效資料列詳細錯誤訊息（含行號、原始值）
+  - 超過筆數/金額上限時明確提示
+- 優化按鈕狀態管理：`exportCsvBtn` 與其他匯出按鈕同步啟用/停用
+- 改善 Toast 通知訊息顯示：錯誤訊息延長至 8 秒，支援多行滾動顯示
+
+### Technical
+- 整合 PapaParse v5.4.1 (via CDN)
+- 更新 `index.html`：
+  - 加入 PapaParse CDN 與 CSV UI 元素
+  - 新增 `csvSourceLabel` 顯示匯入來源檔案名稱
+  - 優化 Toast 樣式（`white-space: pre-wrap`、`max-height: 400px`、`overflow-y: auto`）
+- 更新 `app.js`：
+  - 整合 CSV 匯入/匯出事件處理與狀態管理
+  - 新增 `csvSourceLabel` DOM 元素引用
+  - CSV 匯入成功後顯示檔案名稱
+  - 手動輸入或清除資料時自動清除來源標籤
+- 更新 `csv.js`：
+  - CSV 驗證加入 1000 筆上限檢查
+  - CSV 驗證加入 999,999 金額上限檢查
+  - 範例檔案中金額用雙引號包住（RFC 4180 標準）
+  - 錯誤訊息收集機制改良（顯示前 5 個，支援摘要）
+- 新增 `latestSummaryResult` 全域狀態變數用於 CSV 匯出
+- 檔案上傳採用隱藏 `<input type="file">` + 按鈕觸發方式
+- Blob URL 自動清理機制（防止記憶體洩漏）
+
+### GA4 Events
+- `click_download_sample`：下載 CSV 範例檔案
+- `click_import_csv`：成功匯入 CSV 檔案
+- `click_export_csv`：匯出計算結果為 CSV
+
+### Security & Privacy
+- 維持 100% 本地運算承諾，CSV 處理完全於瀏覽器執行
+- 無任何資料上傳至伺服器
+- PapaParse 為純前端套件，無外部依賴
+
+### Documentation
+- 更新 README.md：新增 CSV 功能說明章節
+- 更新技術說明：記錄 PapaParse 整合資訊
+- 更新當前版本至 v0.3.0
+
 ## [0.2.0] - 2026-08-07
 
 ### Added
@@ -90,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-TW/
 
 ---
 
-[Unreleased]: https://github.com/tzuchienkao/money-snap/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tzuchienkao/money-snap/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.1.0
 [0.0.1]: https://github.com/tzuchienkao/money-snap/releases/tag/v0.0.1

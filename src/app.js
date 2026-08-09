@@ -4,6 +4,7 @@ import { aggregateEntries } from './aggregator.js';
 import { breakdownAmount, aggregateBreakdowns } from './denomination.js';
 import { computeBankTotals } from './bank.js';
 import { MAX_PER_PERSON, MAX_TOTAL } from './config.js';
+import { downloadSampleCsv, parseCsvFile, exportResultsToCsv } from './csv.js';
 
 const inputArea = document.getElementById('inputArea');
 const calcBtn = document.getElementById('calcBtn');
@@ -18,10 +19,20 @@ const hasNameFlagCheckbox = document.getElementById('hasNameFlag');
 const inputLabel = document.getElementById('inputLabel');
 const toastEl = document.getElementById('toast');
 
+// CSV-related DOM elements
+const csvImportBtn = document.getElementById('csvImportBtn');
+const csvFileInput = document.getElementById('csvFileInput');
+const downloadSampleBtn = document.getElementById('downloadSampleBtn');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
+const csvSourceLabel = document.getElementById('csvSourceLabel');
+
 const saveKey = 'money-snap:mvp:v1';
 
 // State variable to track if data is valid for export
 let isDataValidForExport = false;
+
+// State variable to store latest calculation result for CSV export
+let latestSummaryResult = null;
 
 /**
  * 動態更新 UI 提示文字根據模式切換
@@ -114,9 +125,10 @@ function updateButtonStates() {
   // calcBtn: enabled only when there's content
   calcBtn.disabled = !hasContent;
   
-  // exportBtn & copyBankBtn: enabled only when data is valid (after successful calculation)
+  // exportBtn & copyBankBtn & exportCsvBtn: enabled only when data is valid (after successful calculation)
   exportBtn.disabled = !isDataValidForExport;
   copyBankBtn.disabled = !isDataValidForExport;
+  exportCsvBtn.disabled = !isDataValidForExport;
 }
 
 /**
@@ -133,9 +145,13 @@ function showToast(message, duration = 2000, type = 'success') {
   // 加入新的類型樣式
   toastEl.classList.add(type);
   toastEl.classList.add('show');
+  
+  // 錯誤訊息顯示時間較長
+  const displayDuration = type === 'error' ? Math.max(duration, 5000) : duration;
+  
   setTimeout(() => {
     toastEl.classList.remove('show');
-  }, duration);
+  }, displayDuration);
 }
 
 /**
@@ -209,6 +225,7 @@ function clearAll() {
   ['d1000','d500','d100','d50','d10','d5','d1','totalAmount','totalCount'].forEach(id=>document.getElementById(id).textContent='0');
   errorMsg.textContent = '';
   calcTimestampEl.textContent = ''; // Clear timestamp
+  csvSourceLabel.textContent = ''; // Clear CSV source label
   isDataValidForExport = false;
   localStorage.removeItem(saveKey);
   updateButtonStates(); // Update button states after clearing
@@ -288,6 +305,9 @@ function parseAndCompute() {
   // Remove error-highlight class when re-running computation
   inputArea.classList.remove('error-highlight');
   
+  // Clear CSV source label when manually editing
+  csvSourceLabel.textContent = '';
+  
   const text = inputArea.value;
   if (!text || text.trim().length === 0) { 
     alert('請貼上資料後再執行計算。'); 
@@ -359,6 +379,20 @@ function parseAndCompute() {
     exportBtn.disabled = false;
     isDataValidForExport = true; // Set validation state to true
     
+    // Store latest summary result for CSV export
+    latestSummaryResult = {
+      totalAmount: Number(bank.totalAmount),
+      totalCount: bank.perPerson.length,
+      bankTotals: bank.totals,
+      items: bank.perPerson.map(p => ({
+        person: {
+          name: p.name,
+          amount: Number(p.total)
+        },
+        breakdown: p.breakdown
+      }))
+    };
+    
     // Update timestamp display
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
@@ -419,6 +453,103 @@ hasNameFlagCheckbox.addEventListener('change', () => {
 // 一鍵複製銀行領款單事件
 copyBankBtn.addEventListener('click', () => {
   copyBankListToClipboard();
+});
+
+// Download CSV sample button
+downloadSampleBtn.addEventListener('click', () => {
+  try {
+    downloadSampleCsv();
+    sendGaEvent('click_download_sample', 'Data_Import');
+    showToast('✓ 已下載範例 CSV 檔案', 2000, 'success');
+  } catch (error) {
+    console.error('[App] 下載範例失敗:', error);
+    showToast('✗ 下載失敗，請稍後再試', 3000, 'error');
+  }
+});
+
+// CSV import button (triggers file input)
+csvImportBtn.addEventListener('click', () => {
+  csvFileInput.click();
+});
+
+// CSV file input change event
+csvFileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  // Validate file type
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    showToast('✗ 請選擇 CSV 檔案', 3000, 'error');
+    csvFileInput.value = ''; // Reset input
+    return;
+  }
+  
+  // Validate file size (1MB limit)
+  const maxSize = 1 * 1024 * 1024; // 1MB
+  if (file.size > maxSize) {
+    showToast('✗ 檔案過大（上限 1MB）', 3000, 'error');
+    csvFileInput.value = ''; // Reset input
+    return;
+  }
+  
+  const hasNameFlag = hasNameFlagCheckbox.checked;
+  
+  parseCsvFile(file, hasNameFlag, 
+    (parsedItems) => {
+      // Success callback
+      // Convert to text format and populate textarea
+      const textLines = parsedItems.map(item => {
+        if (hasNameFlag) {
+          return `${item.name},${item.amount}`;
+        } else {
+          return `${item.amount}`;
+        }
+      });
+      inputArea.value = textLines.join('\n');
+      
+      // Display CSV source filename
+      csvSourceLabel.textContent = `資料來源由 ${file.name} 匯入`;
+      
+      // Save state and trigger calculation
+      saveState({ 
+        input: inputArea.value,
+        hasNameFlag: hasNameFlag
+      });
+      
+      updateButtonStates();
+      
+      showToast(`✓ 成功匯入 ${parsedItems.length} 筆資料`, 2000, 'success');
+      sendGaEvent('click_import_csv', 'Data_Import');
+      
+      // Reset file input
+      csvFileInput.value = '';
+    },
+    (errorMessage) => {
+      // Error callback
+      showToast(`✗ ${errorMessage}`, 8000, 'error');
+      csvFileInput.value = ''; // Reset input
+    }
+  );
+});
+
+// Export CSV button
+exportCsvBtn.addEventListener('click', () => {
+  if (!latestSummaryResult) {
+    showToast('✗ 目前沒有可匯出的計算結果', 3000, 'error');
+    return;
+  }
+  
+  exportResultsToCsv(latestSummaryResult,
+    () => {
+      // Success callback
+      showToast('✓ CSV 檔案已下載', 2000, 'success');
+      sendGaEvent('click_export_csv', 'Export');
+    },
+    (errorMessage) => {
+      // Error callback
+      showToast(`✗ ${errorMessage}`, 4000, 'error');
+    }
+  );
 });
 
 function formatDateForWatermark(d){

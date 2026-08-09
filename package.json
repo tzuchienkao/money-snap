@@ -1,7 +1,7 @@
 {
   "name": "money-snap",
-  "version": "0.2.0",
-  "description": "幫你算兌 Money Snap - 兌幣計算機 (MVP)",
+  "version": "0.3.0",
+  "description": "幫你算兌 Money Snap - 兌幣計算機 (支援 CSV 匯入匯出)",
   "license": "MIT",
   "private": false,
   "repository": {

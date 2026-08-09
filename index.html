@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>幫你算兌 Money Snap - 兌幣計算機 v0.2.0</title>
+  <title>幫你算兌 Money Snap - 兌幣計算機 v0.3.0</title>
   <meta name="description" content="每月發薪換鈔算到頭痛？「幫你算兌 Money Snap - 兌幣計算機」讓你快速完成面額拆解！支援複製貼上多筆資料，即時產出銀行領款清單，免去人為計算錯誤。採用 100% 瀏覽器本地運算、無伺服器傳輸，確保財務數據絕對安全。">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#f3f4f6" />
@@ -72,6 +72,9 @@
       transform: translateY(-20px);
       transition: opacity 0.3s ease, transform 0.3s ease;
       pointer-events: none;
+      max-width: 500px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
     #toast.show {
       opacity: 1;
@@ -84,6 +87,8 @@
     /* Toast 錯誤樣式 */
     #toast.error {
       background-color: #ffe2e2;
+      max-height: 400px;
+      overflow-y: auto;
     }
   </style>
   <!-- Google tag (gtag.js) -->
@@ -100,11 +105,11 @@
   <!-- Privacy Notice Banner -->
   <div class="max-w-4xl mx-auto mb-4 bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
     <div class="flex items-start">
-      <svg class="w-5 h-5 text-green-600 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+      <svg class="w-5 h-5 text-green-700 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
       </svg>
       <div>
-        <strong class="text-green-800">資料隱私保證</strong>
+        <strong class="text-green-700">資料隱私保證</strong>
         <p class="text-gray-700 mt-1">所有計算 100% 在您的瀏覽器本機執行，資料不會上傳至任何伺服器。本工具為純前端應用，您的敏感資料完全保留在本機裝置。</p>
       </div>
     </div>
@@ -125,10 +130,44 @@
         </label>
       </div>
       
+      <!-- CSV file import & sample download buttons -->
+      <div class="mb-3 flex gap-2 items-center flex-wrap">
+        <button id="csvImportBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded transition-colors inline-flex items-center justify-center gap-1.5 text-sm basis-full md:basis-auto">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          CSV 檔案匯入
+        </button>
+        <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+        
+        <button id="downloadSampleBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded transition-colors inline-flex items-center justify-center gap-1.5 text-sm basis-full md:basis-auto">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          下載 CSV 範例
+        </button>
+      </div>
+      
+      <!-- CSV format hint -->
+      <div class="mb-3 bg-blue-50 border border-blue-200 rounded p-2 text-xs text-gray-700">
+        <div class="flex items-start">
+          <span class="mr-1">💡</span>
+          <div>
+            <strong>CSV 與貼上格式小提示：</strong><br>
+            • 第一欄：姓名（選填，如：張三）｜第二欄：金額（必填，如：18500 或 "45,800" 或 "$32,000"）<br>
+            • CSV 檔案中若金額包含千分位逗號，請用雙引號包住（如："45,800"），避免被誤判為欄位分隔符<br>
+            • 支援 Excel 直接複製貼上或另存 CSV 上傳（系統將自動清洗引號、貨幣符號與千分位逗號）
+          </div>
+        </div>
+      </div>
+      
       <div id="limitsNotice" class="text-xs text-gray-600 mb-2" style="white-space: pre-line;">格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）
 注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。</div>
-      <div class="flex justify-between items-center mb-2">
-        <label class="font-medium" id="inputLabel">請貼上資料（姓名,金額）：</label>
+      <div class="flex justify-between items-center mb-2 flex-wrap md:flex-nowrap">
+        <div class="flex items-baseline gap-2 flex-wrap md:flex-nowrap">
+          <label class="font-medium" id="inputLabel">請貼上資料（姓名,金額）：</label>
+          <span id="csvSourceLabel" class="text-xs text-blue-600"></span>
+        </div>
         <span id="calcTimestamp" class="text-xs text-gray-500"></span>
       </div>
       <textarea id="inputArea" rows="8" class="w-full border rounded p-2" placeholder="例如：
@@ -147,14 +186,7 @@
     </section>
 
     <section class="mb-6" id="bankTotals">
-      <div class="flex justify-between items-center mb-2 flex-wrap md:flex-nowrap">
-        <h2 class="font-medium">銀行領款總需求</h2>
-        <!-- 按鈕群組：一鍵複製與匯出圖片並排 -->
-        <div class="flex gap-3">
-          <button id="copyBankBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>複製銀行領款單</button>
-          <button id="exportBtn" class="border border-green-200 text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1 rounded transition-colors" disabled>匯出領款明細圖</button>
-        </div>
-      </div>
+      <h2 class="font-medium mb-2">銀行領款總需求</h2>
       <!-- 總金額與總筆數獨立一行 -->
       <div class="mb-3">
         總金額：<span id="totalAmount">0</span> 元 | 總筆數：<span id="totalCount">0</span> 筆
@@ -177,6 +209,14 @@
         <thead><tr class="bg-gray-100"><th class="p-2 text-left">姓名</th><th class="p-2">加總金額</th><th class="p-2">面額組合建議</th></tr></thead>
         <tbody id="personRows"></tbody>
       </table>
+      
+      <div class="mt-3 flex justify-center gap-2 flex-wrap md:flex-nowrap">
+        <button id="copyBankBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>複製銀行領款單</button>
+        <button id="exportBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>匯出領款明細圖</button>
+        <button id="exportCsvBtn" class="border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 px-4 py-2 rounded transition-colors inline-flex items-center text-sm justify-center basis-full md:basis-auto" disabled>
+          匯出計算結果 (CSV)
+        </button>
+      </div>
     </section>
   </div>
 
@@ -201,7 +241,7 @@
     </div>
     
     <div class="text-center text-gray-500">
-      <p>Version 0.2.0 · 最後更新：2026-08-7</p>
+      <p>Version 0.3.0 · 最後更新：2026-08-09</p>
     </div>
   </footer>
 
@@ -211,6 +251,8 @@
   <!-- Toast notification -->
   <div id="toast"></div>
 
+  <!-- PapaParse CDN (for CSV import/export) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <!-- html2canvas CDN (for export) -->
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
   <script type="module" src="./src/app.js"></script>
