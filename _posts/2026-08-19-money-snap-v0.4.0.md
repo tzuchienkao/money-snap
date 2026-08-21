@@ -7,10 +7,6 @@ tags: [Money Snap, Gemini, ChatGPT, Copilot CLI, Side Project]
 description: "一個協助現金拆鈔、兌幣與統計的小工具，以及我希望 AI 怎麼工作的協作紀錄。"
 ---
 
-<style>
-  .site-header { display: none !important; }
-</style>
-
 # 當 AI 開始接得回來，我開始思考要怎麼教它工作
 
 當產品開始持續迭代，我發現有些事情不是某一次功能的需求。

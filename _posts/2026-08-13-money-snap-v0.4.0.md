@@ -7,10 +7,6 @@ tags: [Money Snap, Gemini, ChatGPT, Copilot CLI, Side Project]
 description: "一個協助現金拆鈔、兌幣與統計的小工具，以及我與 AI 怎麼一起把產品繼續做下去的協作紀錄。"
 ---
 
-<style>
-  .site-header { display: none !important; }
-</style>
-
 # 我開始發現，和 AI 一起開發，真正重要的是讓它找得到「現在」
 
 做 Money Snap 的時候，我已經慢慢建立了 PRD、開發規格、工作計畫、測試與版本文件。
