@@ -6,6 +6,9 @@
 // - parseCsvFile(file, hasNameFlag, callback) - 解析上傳的 CSV 檔案
 // - exportResultsToCsv(summaryResult) - 匯出計算結果為 CSV
 
+import { detectCurrencySymbolMismatch, getCurrencyProfile, stripAllowedCurrencySymbols } from './currency.js';
+import { t, setLanguage as setI18nLanguage } from './i18n.js';
+
 /**
  * @typedef {Object} ParsedItem
  * @property {string} id - 唯一識別碼
@@ -50,11 +53,24 @@ function isPapaParseAvailable() {
  * @example
  * downloadSampleCsv(); // 觸發瀏覽器下載 MoneySnap_匯入範例.csv
  */
-export function downloadSampleCsv() {
+export function downloadSampleCsv(options = {}) {
   try {
-    // UTF-8 BOM (\uFEFF) + 表頭 + 範例資料
-    // 金額用雙引號包住，避免千分位逗號被誤認為分隔符
-    const sampleContent = '\uFEFF姓名,應發金額\n張三,"45,800"\n李四,"$32,000"\n王五,18500';
+    const language = options.language || 'zh-TW';
+    const profile = getCurrencyProfile(options.currencyCode || 'TWD');
+    setI18nLanguage(language);
+    const headers = language === 'en-US' ? ['Name', 'Amount'] : ['姓名', '應發金額'];
+    const sampleRowsByCurrency = {
+      TWD: [['張三', '45,800'], ['李四', '32,000'], ['王五', '18500']],
+      USD: [['Alice', '120.50'], ['Bob', '45.25'], ['Carol', '19.99']],
+      JPY: [['佐藤', '45800'], ['鈴木', '32000'], ['高橋', '18500']],
+      KRW: [['김민수', '45800'], ['박서준', '32000'], ['이수진', '18500']],
+      CNY: [['张三', '120.50'], ['李四', '45.20'], ['王五', '19.10']],
+      HKD: [['陳大文', '120.50'], ['李美玲', '45.20'], ['王志明', '19.10']],
+      EUR: [['Alice', '120.50'], ['Bob', '45.20'], ['Carla', '19.05']],
+      THB: [['Somchai', '120.50'], ['Anong', '45.25'], ['Niran', '19.75']]
+    };
+    const sampleRows = sampleRowsByCurrency[profile.code] || sampleRowsByCurrency.TWD;
+    const sampleContent = `\uFEFF${headers.join(',')}\n${sampleRows.map(([name, amount]) => `${name},"${profile.symbol}${amount}"`).join('\n')}`;
     const blob = new Blob([sampleContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     
@@ -63,7 +79,10 @@ export function downloadSampleCsv() {
     }
     
     link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', 'MoneySnap_匯入範例.csv');
+    const fileName = language === 'en-US'
+      ? `MoneySnap_${profile.code}_sample.csv`
+      : `MoneySnap_${profile.code}_匯入範例.csv`;
+    link.setAttribute('download', fileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -100,20 +119,24 @@ export function downloadSampleCsv() {
  *   console.error('解析失敗:', error);
  * });
  */
-export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
+export function parseCsvFile(file, hasNameFlag, callback, errorCallback, options = {}) {
+  const language = options.language || 'zh-TW';
+  const profile = getCurrencyProfile(options.currencyCode || 'TWD');
+  const buildItemName = typeof options.buildItemName === 'function'
+    ? options.buildItemName
+    : (index) => language === 'en-US' ? `Item #${index}` : `項目 #${index}`;
   if (!isPapaParseAvailable()) {
-    errorCallback('CSV 解析套件尚未載入，請稍後再試');
+    errorCallback(language === 'en-US' ? 'CSV parser is not loaded yet, please try again later' : 'CSV 解析套件尚未載入，請稍後再試');
     return;
   }
   
-  // Additional validation
   if (!file || !(file instanceof File)) {
-    errorCallback('無效的檔案物件');
+    errorCallback(language === 'en-US' ? 'Invalid file object' : '無效的檔案物件');
     return;
   }
   
   if (file.size === 0) {
-    errorCallback('檔案為空，請選擇包含資料的 CSV 檔案');
+    errorCallback(language === 'en-US' ? 'The file is empty' : '檔案為空，請選擇包含資料的 CSV 檔案');
     return;
   }
   
@@ -123,7 +146,7 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
     complete: function(results) {
       try {
         if (!results || !results.data) {
-          errorCallback('CSV 檔案格式錯誤，無法解析');
+          errorCallback(language === 'en-US' ? 'Unable to parse CSV file' : 'CSV 檔案格式錯誤，無法解析');
           return;
         }
         
@@ -188,30 +211,47 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
               return;
             }
             
-            name = `項目 #${itemCounter}`;
+            name = buildItemName(itemCounter);
             itemCounter++;
           }
           
-          // 自動過濾非數字字元（如 $, ,, 空白）
-          const cleanedAmount = rawAmountStr.replace(/[^\d]/g, '');
-          
-          // 檢查清理後是否還有數字
+          const mismatchedSymbol = detectCurrencySymbolMismatch(rawAmountStr, profile);
+          if (mismatchedSymbol) {
+            errors.push(language === 'en-US'
+              ? `Line ${lineNumber}: currency symbol does not match ${profile.code} (${rawAmountStr})`
+              : `第 ${lineNumber} 行：金額幣別符號與目前選擇的 ${profile.code} 不一致（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
+            return;
+          }
+
+          const cleanedAmount = stripAllowedCurrencySymbols(rawAmountStr, profile)
+            .replace(/[,\s]/g, '');
+
           if (cleanedAmount === '') {
-            errors.push(`第 ${lineNumber} 行：金額格式錯誤，無法解析為數字（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
+            errors.push(language === 'en-US'
+              ? `Line ${lineNumber}: amount format is invalid (${rawAmountStr})`
+              : `第 ${lineNumber} 行：金額格式錯誤，無法解析為數字（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
             return;
           }
-          
-          const amount = parseInt(cleanedAmount, 10);
-          
-          // 檢查金額是否有效
-          if (isNaN(amount) || amount <= 0) {
-            errors.push(`第 ${lineNumber} 行：金額必須為正整數（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
+
+          if (!/^\d+(?:\.\d+)?$/.test(cleanedAmount)) {
+            errors.push(language === 'en-US'
+              ? `Line ${lineNumber}: amount format is invalid (${rawAmountStr})`
+              : `第 ${lineNumber} 行：金額格式錯誤，無法解析為數字（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
             return;
           }
-          
-          // 檢查金額是否超過六位數上限（999,999）
-          if (amount > 999999) {
-            errors.push(`第 ${lineNumber} 行：金額超過單筆上限 999,999（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
+
+          const [integerPart, fractionPart = ''] = cleanedAmount.split('.');
+          if (fractionPart.length > profile.decimals) {
+            errors.push(language === 'en-US'
+              ? `Line ${lineNumber}: too many decimal places for ${profile.code} (${rawAmountStr})`
+              : `第 ${lineNumber} 行：金額小數位數超過 ${profile.code} 允許值（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
+            return;
+          }
+
+          if (Number(integerPart) > 999999) {
+            errors.push(language === 'en-US'
+              ? `Line ${lineNumber}: amount exceeds the per-entry limit 999,999 (${rawAmountStr})`
+              : `第 ${lineNumber} 行：金額超過單筆上限 999,999（原始值：「${rawAmountStr}」${hasNameFlag ? `，姓名：${name}` : ''}）`);
             return;
           }
           
@@ -220,7 +260,7 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
           // 同名加總邏輯
           if (hasNameFlag && nameMap.has(name)) {
             const existing = nameMap.get(name);
-            existing.amount += amount;
+            existing.amount = String(Number(existing.amount) + Number(cleanedAmount));
             existing.mergedCount += 1;
             existing.isMerged = true;
             warnings.push(`第 ${lineNumber} 行：姓名「${name}」重複，已自動加總金額`);
@@ -228,7 +268,7 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
             const itemObj = {
               id: `item-${parsedItems.length}`,
               name: name,
-              amount: amount,
+              amount: cleanedAmount,
               isMerged: false,
               mergedCount: 1
             };
@@ -239,20 +279,22 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
         
         // 如果有錯誤，顯示詳細錯誤訊息
         if (errors.length > 0) {
-          const errorSummary = `CSV 檔案包含 ${errors.length} 個錯誤：\n\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... 還有 ${errors.length - 5} 個錯誤` : ''}`;
+          const errorSummary = language === 'en-US'
+            ? `CSV file contains ${errors.length} error(s):\n\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ''}`
+            : `CSV 檔案包含 ${errors.length} 個錯誤：\n\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... 還有 ${errors.length - 5} 個錯誤` : ''}`;
           errorCallback(errorSummary);
           return;
         }
         
-        // 如果沒有有效資料
         if (parsedItems.length === 0) {
-          errorCallback('CSV 檔案中沒有有效的資料行，請檢查檔案格式');
+          errorCallback(language === 'en-US' ? 'No valid data rows found in the CSV file' : 'CSV 檔案中沒有有效的資料行，請檢查檔案格式');
           return;
         }
         
-        // 檢查資料筆數是否超過上限 1000 筆
         if (parsedItems.length > 1000) {
-          errorCallback(`CSV 檔案包含 ${parsedItems.length} 筆資料，超過上限 1000 筆`);
+          errorCallback(language === 'en-US'
+            ? `CSV file contains ${parsedItems.length} rows, exceeding the limit of 1000`
+            : `CSV 檔案包含 ${parsedItems.length} 筆資料，超過上限 1000 筆`);
           return;
         }
         
@@ -265,12 +307,12 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
         callback(parsedItems);
       } catch (err) {
         console.error('[CSV] 解析過程發生錯誤:', err);
-        errorCallback(`CSV 解析失敗：${err.message || '未知錯誤'}`);
+        errorCallback(language === 'en-US' ? `CSV parsing failed: ${err.message || 'Unknown error'}` : `CSV 解析失敗：${err.message || '未知錯誤'}`);
       }
     },
     error: function(err) {
       console.error('[CSV] PapaParse 錯誤:', err);
-      errorCallback(`CSV 檔案讀取失敗：${err.message || '檔案格式可能不正確'}`);
+      errorCallback(language === 'en-US' ? `CSV read failed: ${err.message || 'Invalid file format'}` : `CSV 檔案讀取失敗：${err.message || '檔案格式可能不正確'}`);
     }
   });
 }
@@ -295,14 +337,16 @@ export function parseCsvFile(file, hasNameFlag, callback, errorCallback) {
  *   (error) => console.error('匯出失敗:', error)
  * );
  */
-export function exportResultsToCsv(summaryResult, successCallback, errorCallback) {
+export function exportResultsToCsv(summaryResult, successCallback, errorCallback, options = {}) {
+  const language = options.language || 'zh-TW';
+  const profile = getCurrencyProfile(options.currencyCode || summaryResult.currencyCode || 'TWD');
   if (!isPapaParseAvailable()) {
-    errorCallback('CSV 解析套件尚未載入，請稍後再試');
+    errorCallback(language === 'en-US' ? 'CSV parser is not loaded yet, please try again later' : 'CSV 解析套件尚未載入，請稍後再試');
     return;
   }
   
   if (!summaryResult || !summaryResult.items || summaryResult.items.length === 0) {
-    errorCallback('目前沒有可匯出的計算結果，請先執行計算');
+    errorCallback(language === 'en-US' ? 'No calculation result available for export' : '目前沒有可匯出的計算結果，請先執行計算');
     return;
   }
   
@@ -312,8 +356,9 @@ export function exportResultsToCsv(summaryResult, successCallback, errorCallback
       throw new Error('計算結果資料結構不完整');
     }
     
-    // 標準面額列表（與規格書一致）
-    const denoms = [2000, 1000, 500, 200, 100, 50, 20, 10, 5, 1];
+    const denoms = [...profile.defaultBanknotes, ...profile.defaultCoins];
+    const nameHeader = language === 'en-US' ? 'Name' : '姓名';
+    const amountHeader = language === 'en-US' ? `Amount (${profile.code})` : `應領金額 (${profile.code})`;
     
     // 1. 組裝個人資料列
     const exportRows = summaryResult.items.map((item, index) => {
@@ -322,22 +367,21 @@ export function exportResultsToCsv(summaryResult, successCallback, errorCallback
       }
       
       const row = {
-        '姓名': item.person.name,
-        '應領金額': item.person.amount
+        [nameHeader]: item.person.name,
+        [amountHeader]: item.person.amount
       };
       denoms.forEach(d => {
-        row[`${d}元`] = item.breakdown[d] || 0;
+        row[String(d)] = item.breakdown[d] || 0;
       });
       return row;
     });
     
-    // 2. 附加最後一列「總計」
     const totalRow = {
-      '姓名': '總計',
-      '應領金額': summaryResult.totalAmount
+      [nameHeader]: language === 'en-US' ? 'Total' : '總計',
+      [amountHeader]: summaryResult.totalAmount
     };
     denoms.forEach(d => {
-      totalRow[`${d}元`] = summaryResult.bankTotals[d] || 0;
+      totalRow[String(d)] = summaryResult.bankTotals[d] || 0;
     });
     exportRows.push(totalRow);
     
@@ -361,7 +405,9 @@ export function exportResultsToCsv(summaryResult, successCallback, errorCallback
       String(now.getMonth() + 1).padStart(2, '0') +
       String(now.getDate()).padStart(2, '0');
     
-    const fileName = `MoneySnap_面額明細_${dateStr}.csv`;
+    const fileName = language === 'en-US'
+      ? `MoneySnap_${profile.code}_breakdown_${dateStr}.csv`
+      : `MoneySnap_${profile.code}_面額明細_${dateStr}.csv`;
     
     link.href = URL.createObjectURL(blob);
     link.setAttribute('download', fileName);

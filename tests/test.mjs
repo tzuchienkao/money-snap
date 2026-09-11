@@ -1,11 +1,57 @@
 import assert from 'assert';
 import { parseInput } from '../src/parser.js';
 import { aggregateEntries } from '../src/aggregator.js';
+import {
+  getCurrencyProfile,
+  getCurrencyDenominations,
+  scaleAmount,
+  descaleAmount,
+  detectCurrencySymbolMismatch,
+  stripAllowedCurrencySymbols
+} from '../src/currency.js';
+import {
+  setLanguage as setI18nLanguage,
+  getLanguage as getI18nLanguage,
+  t
+} from '../src/i18n.js';
+import { buildCurrencyAwareCopy, getCurrencyExamples } from '../src/currency-copy.js';
+import { localizeBankError, localizeParseError, localizeValidationError } from '../src/error-messages.js';
+import {
+  loadDenomConfig,
+  saveDenomConfig,
+  getActiveDenominations,
+  setActiveDenominations,
+  toggleSaveAsDefault,
+  getCurrentConfig,
+  setCurrentCurrency,
+  getCurrentCurrency,
+  setLanguage as setConfigLanguage,
+  getLanguage as getConfigLanguage,
+  setCustomDenomEnabled,
+  isCustomDenomEnabled,
+  resetToDefaults
+} from '../src/denomination-config.js';
 
 function toComparableBig(v){
   if (typeof v === 'bigint') return v;
   return BigInt(Math.round(Number(v) || 0));
 }
+
+globalThis.localStorage = {
+  _store: new Map(),
+  getItem(key) {
+    return this._store.has(key) ? this._store.get(key) : null;
+  },
+  setItem(key, value) {
+    this._store.set(key, String(value));
+  },
+  removeItem(key) {
+    this._store.delete(key);
+  },
+  clear() {
+    this._store.clear();
+  }
+};
 function testParse(description, input, expected, hasNameFlag = true) {
   const res = parseInput(input, hasNameFlag);
   if (expected.error) {
@@ -32,10 +78,10 @@ function testAggregate(description, entries, expected) {
 // Tests
 console.log('Running parser tests...');
 
-// 1. thousand separators and currency symbols
-testParse('千分位與貨幣符號', '王小明,$1,200\n張三,¥300', {
-  inputSum: 1500,
-  entries: [ { name: '王小明', amt: 1200 }, { name: '張三', amt: 300 } ]
+// 1. thousand separators and matching currency symbols
+testParse('千分位與台幣符號', '王小明,$1,200\n張三,3200', {
+  inputSum: 4400,
+  entries: [ { name: '王小明', amt: 1200 }, { name: '張三', amt: 3200 } ]
 });
 
 // 2. fullwidth comma and space
@@ -87,9 +133,9 @@ assert.strictEqual(resPureAmount.entries[0].name, '項目 #1');
 assert.strictEqual(resPureAmount.entries[1].name, '項目 #2');
 assert.strictEqual(resPureAmount.entries[2].name, '項目 #3');
 
-// 10. 純金額模式 - 含千分位與貨幣符號
-const resPureWithComma = parseInput('$1,200\n¥2,500', false);
-assert(!resPureWithComma.error, '純金額模式應支援千分位與貨幣符號');
+// 10. 純金額模式 - 含千分位與當前幣別符號
+const resPureWithComma = parseInput('$1,200\n$2,500', false);
+assert(!resPureWithComma.error, '純金額模式應支援千分位與當前幣別符號');
 assert.strictEqual(toComparableBig(resPureWithComma.inputSum).toString(), '3700');
 assert.strictEqual(resPureWithComma.entries[0].name, '項目 #1');
 assert.strictEqual(resPureWithComma.entries[1].name, '項目 #2');
@@ -157,6 +203,244 @@ if ((typeof bank.totalAmount === 'bigint' ? bank.totalAmount !== BigInt(1466) : 
 if (bank.totals[100] < 3) throw new Error('computeBankTotals incorrect totals');
 
 console.log('Denomination tests passed.');
+
+console.log('Running multi-currency scaling tests...');
+
+const usdProfile = getCurrencyProfile('USD');
+assert.strictEqual(usdProfile.code, 'USD');
+assert.strictEqual(usdProfile.decimals, 2);
+assert.deepStrictEqual(
+  getCurrencyDenominations('USD'),
+  [100, 50, 20, 10, 5, 2, 1, 0.5, 0.25, 0.1, 0.05, 0.01],
+  'USD 預設面額應包含紙鈔與硬幣'
+);
+assert.strictEqual(scaleAmount('120.50', 'USD').toString(), '12050');
+assert.strictEqual(descaleAmount(12050n, 'USD'), 120.5);
+
+const usdParsed = parseInput('Alice,120.50\nBob,$45.25', true, { currencyCode: 'USD' });
+assert(!usdParsed.error, `USD parsing should succeed: ${usdParsed.error && usdParsed.error.message}`);
+assert.strictEqual(usdParsed.inputSum.toString(), '16575');
+assert.deepStrictEqual(
+  usdParsed.entries.map((entry) => ({ name: entry.name, amt: entry.amt.toString() })),
+  [
+    { name: 'Alice', amt: '12050' },
+    { name: 'Bob', amt: '4525' }
+  ],
+  'USD parsing should scale to cents'
+);
+
+const usdTooPrecise = parseInput('Alice,12.345', true, { currencyCode: 'USD' });
+assert(usdTooPrecise.error, '超過貨幣允許小數位數應回傳錯誤');
+
+const eurSymbolMismatch = parseInput('Alice,฿120.50\nBob,$999.76', true, { currencyCode: 'EUR' });
+assert(eurSymbolMismatch.error, 'EUR 模式應拒絕非歐元符號');
+assert.strictEqual(eurSymbolMismatch.error.line, 1, '應在第一個錯誤符號行失敗');
+
+const eurAllowedSymbol = parseInput('Alice,€120.50\nBob,999.76', true, { currencyCode: 'EUR' });
+assert(!eurAllowedSymbol.error, 'EUR 模式應接受歐元符號與無符號輸入');
+
+assert.strictEqual(detectCurrencySymbolMismatch('฿120.50', 'EUR'), '฿');
+assert.strictEqual(detectCurrencySymbolMismatch('$999.76', 'EUR'), '$');
+assert.strictEqual(detectCurrencySymbolMismatch('NT$32,000', 'TWD'), null);
+assert.strictEqual(stripAllowedCurrencySymbols('NT$32,000', 'TWD'), '32,000');
+assert.strictEqual(stripAllowedCurrencySymbols('€120.50', 'EUR'), '120.50');
+
+const usdDenoms = getCurrencyDenominations('USD');
+const usdAmount = scaleAmount('120.86', 'USD');
+const usdBreakdown = breakdownAmount(usdAmount, usdDenoms, { currencyCode: 'USD' });
+assert.strictEqual(usdBreakdown.remainder.toString(), '0', 'USD 拆解不應有殘額');
+assert.strictEqual(usdBreakdown.breakdown[100], 1, '應有一張 100 美元');
+assert.strictEqual(usdBreakdown.breakdown[20], 1, '應有一張 20 美元');
+assert.strictEqual(usdBreakdown.breakdown[0.5], 1, '應有一枚 50 cent');
+assert.strictEqual(usdBreakdown.breakdown[0.25], 1, '應有一枚 quarter');
+assert.strictEqual(usdBreakdown.breakdown[0.1], 1, '應有一枚 dime');
+assert.strictEqual(usdBreakdown.breakdown[0.01], 1, '應有一枚 penny');
+
+const usdAgg = aggregateBreakdowns([usdBreakdown.breakdown], usdDenoms, { currencyCode: 'USD' });
+assert.strictEqual(usdAgg.totalAmount.toString(), '12086', 'USD 聚合總額應以 cents 回傳');
+
+const usdPeople = [
+  { name: 'Alice', total: scaleAmount('120.50', 'USD') },
+  { name: 'Bob', total: scaleAmount('45.25', 'USD') }
+];
+const usdBank = computeBankTotals(usdPeople, usdDenoms, { currencyCode: 'USD' });
+assert.strictEqual(usdBank.totalAmount.toString(), '16575', 'USD 銀行總額應以 cents 對帳');
+assert.strictEqual(verifyDoubleEntry(usdParsed.inputSum, usdBank.totalAmount), true, 'USD 對帳應通過');
+
+const jpyProfile = getCurrencyProfile('JPY');
+assert.strictEqual(jpyProfile.decimals, 0, 'JPY 應為 0 位小數');
+assert.deepStrictEqual(
+  getCurrencyDenominations('JPY'),
+  [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1],
+  'JPY 預設面額應正確'
+);
+
+const krwProfile = getCurrencyProfile('KRW');
+assert.strictEqual(krwProfile.decimals, 0, 'KRW 應為 0 位小數');
+assert.deepStrictEqual(
+  getCurrencyDenominations('KRW'),
+  [50000, 10000, 5000, 1000, 500, 100, 50, 10],
+  'KRW 預設面額應正確'
+);
+
+const cnyProfile = getCurrencyProfile('CNY');
+assert.strictEqual(cnyProfile.decimals, 2, 'CNY 應為 2 位小數');
+assert.deepStrictEqual(
+  getCurrencyDenominations('CNY'),
+  [100, 50, 20, 10, 5, 1, 0.5, 0.1],
+  'CNY 面額應去除重複的 1 元'
+);
+assert.strictEqual(scaleAmount('120.50', 'CNY').toString(), '12050');
+
+const hkdProfile = getCurrencyProfile('HKD');
+assert.strictEqual(hkdProfile.decimals, 2, 'HKD 應為 2 位小數');
+assert.deepStrictEqual(
+  getCurrencyDenominations('HKD'),
+  [1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1],
+  'HKD 面額應去除重複的 10 元'
+);
+assert.strictEqual(detectCurrencySymbolMismatch('HK$999.10', 'HKD'), null);
+assert.strictEqual(detectCurrencySymbolMismatch('HK$999.10', 'USD'), 'HK$');
+assert.strictEqual(stripAllowedCurrencySymbols('HK$999.10', 'HKD'), '999.10');
+const hkdParsed = parseInput('Alex,HK$999.10\nMay,120.50', true, { currencyCode: 'HKD' });
+assert(!hkdParsed.error, 'HKD 應接受 HK$ 與無符號輸入');
+
+const krwParsed = parseInput('Minsu,₩45,800\nSujin,32000', true, { currencyCode: 'KRW' });
+assert(!krwParsed.error, 'KRW 應接受 ₩ 與無符號輸入');
+assert.strictEqual(krwParsed.inputSum.toString(), '77800');
+
+console.log('Multi-currency scaling tests passed.');
+
+console.log('Running i18n tests...');
+assert.strictEqual(getI18nLanguage(), 'zh-TW');
+assert.strictEqual(t('appTitle'), '幫你算兌 Money Snap - 兌幣計算機');
+setI18nLanguage('en-US');
+assert.strictEqual(getI18nLanguage(), 'en-US');
+assert.strictEqual(t('calculate'), 'Calculate');
+assert.strictEqual(t('importCsvSuccess', { count: 3 }), '✓ Imported 3 rows successfully');
+const englishParseError = parseInput('Alice,฿120.50', true, { currencyCode: 'EUR' }).error;
+assert(englishParseError, '應產生 parser error');
+assert.strictEqual(
+  localizeParseError(englishParseError, 'en-US'),
+  'Currency symbol does not match the selected EUR'
+);
+try {
+  verifyDoubleEntry(1000n, 995n);
+  throw new Error('expected mismatch');
+} catch (error) {
+  assert.strictEqual(error.code, 'DOUBLE_ENTRY_MISMATCH');
+  assert(localizeBankError(error, 'en-US').includes('Critical finance warning'), '銀行驗證錯誤應可英文化');
+}
+assert.strictEqual(
+  localizeValidationError('TOTAL_LIMIT', { max: 9999999999 }, 'en-US'),
+  'Validation error: total amount exceeds the limit of 9999999999'
+);
+setI18nLanguage('zh-TW');
+console.log('i18n tests passed.');
+
+console.log('Running currency-aware copy tests...');
+const twdCopy = buildCurrencyAwareCopy('TWD', 'zh-TW', true);
+assert(twdCopy.csvHintLine1.includes('18500'), 'TWD tip 應包含整數示例');
+assert(twdCopy.csvHintLine1.includes('45,800'), 'TWD tip 應包含千分位示例');
+assert(twdCopy.csvHintLine1.includes('NT$32,000'), 'TWD tip 應包含 TWD 貨幣符號示例');
+assert(!twdCopy.csvHintLine1.includes('選填'), '姓名欄位提示不應再標示選填');
+assert(twdCopy.csvHintLine1.includes('姓名（必填'), '勾選姓名模式時應明確標示姓名必填');
+assert(twdCopy.placeholderNamed.includes('張三,18500'), 'TWD named placeholder 應符合台幣格式');
+assert(twdCopy.placeholderUnnamed.includes('NT$32,000'), 'TWD unnamed placeholder 應包含台幣符號');
+
+const usdCopy = buildCurrencyAwareCopy('USD', 'en-US', true);
+assert(usdCopy.csvHintLine1.includes('120.50'), 'USD tip 應包含純數字示例');
+assert(usdCopy.csvHintLine1.includes('1,245.75'), 'USD tip 應包含千分位示例');
+assert(usdCopy.csvHintLine1.includes('$999.99'), 'USD tip 應包含美元符號示例');
+assert(!usdCopy.csvHintLine1.includes('optional'), 'English hint should not say optional');
+assert(usdCopy.csvHintLine1.includes('Name (required'), 'Checked name mode should say name is required');
+assert(usdCopy.modeHintNamed.includes('Alice,120.50'), 'USD named mode hint 應顯示純數字美元範例');
+assert(usdCopy.placeholderUnnamed.includes('$999.99'), 'USD unnamed placeholder 應顯示美元符號示例');
+
+const usdAmountOnlyCopy = buildCurrencyAwareCopy('USD', 'en-US', false);
+assert(!usdAmountOnlyCopy.csvHintLine1.includes('Column 1: Name'), 'Amount-only mode should not mention name column');
+assert(usdAmountOnlyCopy.csvHintLine1.includes('Amount only mode'), 'Amount-only mode should explain amount-only input');
+
+const jpyExamples = getCurrencyExamples('JPY', 'en-US');
+assert.strictEqual(jpyExamples.namedRows[0][1], '45800', 'JPY 範例應提供純數字格式');
+assert.strictEqual(jpyExamples.namedRows[1][1], '32,000', 'JPY 範例應提供千分位格式');
+assert.strictEqual(jpyExamples.namedRows[2][1], '¥18,500', 'JPY 範例應提供符號格式');
+
+const krwCopy = buildCurrencyAwareCopy('KRW', 'en-US', true);
+assert(krwCopy.csvHintLine1.includes('₩18,500'), 'KRW tip 應包含韓元符號示例');
+
+const cnyCopy = buildCurrencyAwareCopy('CNY', 'zh-TW', true);
+assert(cnyCopy.csvHintLine1.includes('120.50'), 'CNY tip 應包含純數字示例');
+assert(cnyCopy.csvHintLine1.includes('1,245.75'), 'CNY tip 應包含千分位示例');
+assert(cnyCopy.csvHintLine1.includes('¥999.10'), 'CNY tip 應包含人民幣符號示例');
+
+const hkdCopy = buildCurrencyAwareCopy('HKD', 'en-US', false);
+assert(hkdCopy.csvHintLine1.includes('HK$999.10'), 'HKD 純金額模式應包含港幣符號示例');
+
+const eurCopy = buildCurrencyAwareCopy('EUR', 'en-US', true);
+assert(eurCopy.csvHintLine1.includes('120.50'), 'EUR tip 應包含純數字示例');
+assert(eurCopy.csvHintLine1.includes('1,245.75'), 'EUR tip 應包含千分位示例');
+assert(eurCopy.csvHintLine1.includes('€999.76'), 'EUR tip 應包含歐元符號示例');
+console.log('Currency-aware copy tests passed.');
+
+console.log('Running multi-currency config tests...');
+localStorage.clear();
+resetToDefaults();
+loadDenomConfig();
+assert.strictEqual(getCurrentCurrency(), 'TWD');
+assert.strictEqual(getConfigLanguage(), 'zh-TW');
+assert.deepStrictEqual(getActiveDenominations(), [1000, 500, 100, 50, 10, 5, 1]);
+
+setCurrentCurrency('USD');
+assert.strictEqual(getCurrentCurrency(), 'USD');
+assert.deepStrictEqual(getActiveDenominations(), [100, 50, 20, 10, 5, 1, 0.25, 0.1, 0.05, 0.01]);
+assert.strictEqual(isCustomDenomEnabled(), false);
+
+setCurrentCurrency('HKD');
+assert.deepStrictEqual(getActiveDenominations(), [1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1], 'HKD 預設啟用面額應正確');
+
+setCurrentCurrency('CNY');
+assert.deepStrictEqual(getActiveDenominations(), [100, 50, 20, 10, 5, 1, 0.5, 0.1], 'CNY 預設啟用面額應正確');
+
+setCurrentCurrency('KRW');
+assert.deepStrictEqual(getActiveDenominations(), [50000, 10000, 5000, 1000, 500, 100, 50, 10], 'KRW 預設啟用面額應正確');
+
+setCurrentCurrency('USD');
+setCustomDenomEnabled(true);
+setActiveDenominations([100, 20, 10, 1, 0.25, 0.1, 0.05, 0.01]);
+assert.strictEqual(isCustomDenomEnabled(), true);
+assert.deepStrictEqual(getActiveDenominations(), [100, 20, 10, 1, 0.25, 0.1, 0.05, 0.01]);
+
+setConfigLanguage('en-US');
+toggleSaveAsDefault(true);
+assert.strictEqual(getCurrentConfig().saveAsDefault, true);
+
+setCurrentCurrency('TWD');
+assert.deepStrictEqual(getActiveDenominations(), [1000, 500, 100, 50, 10, 5, 1], '切回 TWD 應保留 TWD 預設');
+
+loadDenomConfig();
+setCurrentCurrency('USD');
+assert.strictEqual(getConfigLanguage(), 'en-US', '應從 localStorage 還原語系');
+assert.strictEqual(isCustomDenomEnabled(), true, '應從 localStorage 還原自訂開關');
+assert.deepStrictEqual(
+  getActiveDenominations(),
+  [100, 20, 10, 1, 0.25, 0.1, 0.05, 0.01],
+  '應從 localStorage 還原各幣別啟用面額'
+);
+
+saveDenomConfig({
+  language: 'zh-TW',
+  currency: 'EUR',
+  saveAsDefault: false,
+  currencies: {
+    EUR: {
+      isCustomEnabled: true,
+      activeDenominations: [200, 100, 50, 20, 10, 5, 2, 1]
+    }
+  }
+});
+assert.strictEqual(localStorage.getItem('money_snap_multi_currency_config_v5'), null, 'saveAsDefault=false 不應寫入 localStorage');
+console.log('Multi-currency config tests passed.');
 
 // ===== v0.4.0: Custom Denomination Configuration Tests =====
 console.log('Running v0.4.0 denomination config tests...');

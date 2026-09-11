@@ -49,11 +49,20 @@ export function verifyDoubleEntry(inputSum, bankTotalAmount) {
   if (inputBig !== bankBig) {
     const diff = inputBig - bankBig;
     const diffAbs = diff < 0n ? -diff : diff;
-    throw new Error(
+    const error = new Error(
       `【財務嚴重警告】輸入總額 ($${inputBig}) 與面額拆解總金額 ($${bankBig}) 不符！\n` +
       `差額：${diff > 0n ? '+' : ''}${diff} 元（${diff > 0n ? '多' : '少'} ${diffAbs} 元）\n` +
       `請確認是否漏選 1 元面額，或面額設定導致無法完全拆解。`
     );
+    error.code = 'DOUBLE_ENTRY_MISMATCH';
+    error.meta = {
+      input: inputBig.toString(),
+      bank: bankBig.toString(),
+      diff: diff.toString(),
+      diffAbs: diffAbs.toString(),
+      direction: diff > 0n ? 'over' : 'under'
+    };
+    throw error;
   }
   
   return true;
@@ -100,15 +109,15 @@ export function verifyDoubleEntry(inputSum, bankTotalAmount) {
  * //   totalAmount: 185n
  * // }
  */
-export function computeBankTotals(people, denominations = [1000,500,100,50,10,5,1]){
+export function computeBankTotals(people, denominations = [1000,500,100,50,10,5,1], options = {}){
   const perPerson = [];
   const breakdowns = [];
   for (const p of people){
-    const { breakdown, remainder } = breakdownAmount(p.total, denominations);
+    const { breakdown, remainder } = breakdownAmount(p.total, denominations, options);
     // remainder should be 0 for integer totals
     perPerson.push({ name: p.name, total: p.total, breakdown });
     breakdowns.push(breakdown);
   }
-  const agg = aggregateBreakdowns(breakdowns, denominations);
+  const agg = aggregateBreakdowns(breakdowns, denominations, options);
   return { perPerson, totals: agg.totals, totalAmount: agg.totalAmount };
 }

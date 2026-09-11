@@ -1,20 +1,26 @@
 // src/app.js
 import { parseInput } from './parser.js';
 import { aggregateEntries } from './aggregator.js';
-import { breakdownAmount, aggregateBreakdowns } from './denomination.js';
 import { computeBankTotals, verifyDoubleEntry } from './bank.js';
 import { MAX_PER_PERSON, MAX_TOTAL } from './config.js';
 import { downloadSampleCsv, parseCsvFile, exportResultsToCsv } from './csv.js';
 import {
-  DEFAULT_DENOMINATIONS,
-  DEFAULT_ACTIVE_DENOMINATIONS,
   loadDenomConfig,
-  saveDenomConfig,
   getActiveDenominations,
   setActiveDenominations,
   toggleSaveAsDefault,
-  getCurrentConfig
+  getCurrentConfig,
+  setCurrentCurrency,
+  getCurrentCurrency,
+  setLanguage as setConfigLanguage,
+  getLanguage as getConfigLanguage,
+  setCustomDenomEnabled,
+  isCustomDenomEnabled
 } from './denomination-config.js';
+import { getCurrencyDenominations, getCurrencyProfile, descaleAmount } from './currency.js';
+import { t, setLanguage as setI18nLanguage } from './i18n.js';
+import { buildCurrencyAwareCopy } from './currency-copy.js';
+import { localizeBankError, localizeParseError, localizeValidationError } from './error-messages.js';
 
 const inputArea = document.getElementById('inputArea');
 const calcBtn = document.getElementById('calcBtn');
@@ -28,6 +34,10 @@ const calcTimestampEl = document.getElementById('calcTimestamp');
 const hasNameFlagCheckbox = document.getElementById('hasNameFlag');
 const inputLabel = document.getElementById('inputLabel');
 const toastEl = document.getElementById('toast');
+const languageSelect = document.getElementById('languageSelect');
+const currencySelect = document.getElementById('currencySelect');
+const bankTotalsGrid = document.getElementById('bankTotalsGrid');
+const denominationSections = document.getElementById('denominationSections');
 
 // CSV-related DOM elements
 const csvImportBtn = document.getElementById('csvImportBtn');
@@ -41,8 +51,6 @@ const enableCustomDenomCheckbox = document.getElementById('enableCustomDenom');
 const defaultDenomHint = document.getElementById('defaultDenomHint');
 const denomPanelContent = document.getElementById('denomPanelContent');
 const saveDenomPreferenceCheckbox = document.getElementById('saveDenomPreference');
-const billsSelectAllCheckbox = document.getElementById('billsSelectAll');
-const coinsSelectAllCheckbox = document.getElementById('coinsSelectAll');
 
 const saveKey = 'money-snap:mvp:v1';
 
@@ -52,91 +60,182 @@ let isDataValidForExport = false;
 // State variable to store latest calculation result for CSV export
 let latestSummaryResult = null;
 
+let currentLanguage = getConfigLanguage();
+let currentCurrency = getCurrentCurrency();
+
+function getCurrentProfile() {
+  return getCurrencyProfile(currentCurrency);
+}
+
+function isDecimalCurrency() {
+  return getCurrentProfile().decimals > 0;
+}
+
+function getCurrentCalculationDenominations() {
+  return isCustomDenomEnabled(currentCurrency)
+    ? getActiveDenominations(currentCurrency)
+    : getCurrencyDenominations(currentCurrency);
+}
+
+function formatDenominationValue(value, currencyCode = currentCurrency) {
+  const profile = getCurrencyProfile(currencyCode);
+  const decimals = profile.decimals;
+  const formatter = new Intl.NumberFormat(currentLanguage === 'en-US' ? 'en-US' : 'zh-TW', {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : decimals,
+    maximumFractionDigits: decimals
+  });
+  return `${profile.symbol}${formatter.format(Number(value))}`;
+}
+
+function formatAmount(v, currencyCode = currentCurrency) {
+  const profile = getCurrencyProfile(currencyCode);
+  const locale = currentLanguage === 'en-US' ? 'en-US' : 'zh-TW';
+  if (typeof v === 'bigint') {
+    if (profile.decimals > 0) {
+      return new Intl.NumberFormat(locale, {
+        minimumFractionDigits: profile.decimals,
+        maximumFractionDigits: profile.decimals
+      }).format(descaleAmount(v, profile));
+    }
+    return numberWithCommas(v.toString());
+  }
+  if (typeof v === 'number') {
+    return new Intl.NumberFormat(locale, {
+      minimumFractionDigits: Number.isInteger(v) ? 0 : profile.decimals,
+      maximumFractionDigits: profile.decimals
+    }).format(v);
+  }
+  if (typeof v === 'string') return v;
+  return String(v);
+}
+
+function formatItemLabel(index) {
+  return t('itemLabel', { index });
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function getDenomElementId(value) {
+  return `d${String(value).replace('.', '_')}`;
+}
+
+function renderBankTotalsGrid() {
+  const profile = getCurrentProfile();
+  const denominations = getCurrencyDenominations(currentCurrency);
+  bankTotalsGrid.innerHTML = denominations.map((denom) => {
+    const unit = profile.defaultBanknotes.includes(denom) ? t('unitsBill') : t('unitsCoin');
+    return `<div>${formatDenominationValue(denom)}：<span id="${getDenomElementId(denom)}">0</span> ${unit}</div>`;
+  }).join('');
+}
+
+function renderDefaultDenominationHint() {
+  const denoms = getCurrencyDenominations(currentCurrency).map((d) => formatDenominationValue(d)).join(', ');
+  defaultDenomHint.textContent = t('activeDefaults', {
+    currency: currentCurrency,
+    denoms
+  });
+}
+
+function renderDenominationControls() {
+  const profile = getCurrentProfile();
+  const activeDenoms = getActiveDenominations(currentCurrency);
+  const billItems = profile.defaultBanknotes;
+  const coinItems = profile.defaultCoins.filter((value) => !profile.defaultBanknotes.includes(value));
+
+  const renderSection = (label, items, className, selectAllId) => `
+    <div class="mb-4">
+      <div class="flex items-center mb-2">
+        <label class="text-sm font-medium text-gray-700">${label}：</label>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <label class="inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="${selectAllId}" class="mr-1 w-3.5 h-3.5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
+          <span>${t('selectAll')}</span>
+        </label>
+        ${items.map((value) => {
+          const checked = activeDenoms.includes(value) ? 'checked' : '';
+          const note = value === items[items.length - 1] ? ` <span class="text-xs text-gray-500">${t('unitsNote')}</span>` : '';
+          return `<label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" class="denom-checkbox ${className} mr-2 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" data-value="${value}" ${checked}>
+            <span class="text-sm">${formatDenominationValue(value)}${note}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  denominationSections.innerHTML = [
+    renderSection(t('banknotes'), billItems, 'denom-bill', 'billsSelectAll'),
+    renderSection(t('coins'), coinItems, 'denom-coin', 'coinsSelectAll')
+  ].join('');
+
+  document.querySelectorAll('.denom-checkbox').forEach((cb) => cb.addEventListener('change', handleDenomCheckboxChange));
+  document.getElementById('billsSelectAll')?.addEventListener('change', (event) => handleSelectAllChange(event, '.denom-bill', 'paper'));
+  document.getElementById('coinsSelectAll')?.addEventListener('change', (event) => handleSelectAllChange(event, '.denom-coin', 'coin'));
+  updateSelectAllCheckboxes();
+}
+
 /**
  * 動態更新 UI 提示文字根據模式切換
  */
 function updateUIForMode() {
   const hasNameFlag = hasNameFlagCheckbox.checked;
+  const currencyCopy = buildCurrencyAwareCopy(currentCurrency, currentLanguage, hasNameFlag);
   
   if (hasNameFlag) {
-    // 含姓名模式
     if (limitsNoticeEl) {
-      limitsNoticeEl.textContent = `格式：姓名,金額（手動輸入用逗號；從試算表複製貼上會自動辨識）\n注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999；姓名可重複多筆，系統會自動加總。`;
+      limitsNoticeEl.textContent = currencyCopy.modeHintNamed;
     }
     if (inputLabel) {
-      inputLabel.textContent = '請貼上資料（姓名,金額）：';
+      inputLabel.textContent = t('inputLabelNamed');
     }
-    inputArea.placeholder = `例如：
-王小明,1200
-張三,300
-王小明,800`;
-    inputArea.inputMode = ""
+    inputArea.placeholder = currencyCopy.placeholderNamed;
+    inputArea.inputMode = '';
   } else {
-    // 純金額模式
     if (limitsNoticeEl) {
-      limitsNoticeEl.textContent = `格式：金額（每行一筆數字，姓名欄位系統自動編號為「項目 #1」、「項目 #2」...）\n注意：每次最多可貼入 1000 筆；每筆金額之整數部分上限為 999,999。`;
+      limitsNoticeEl.textContent = currencyCopy.modeHintUnnamed;
     }
     if (inputLabel) {
-      inputLabel.textContent = '請貼上資料（純金額）：';
+      inputLabel.textContent = t('inputLabelUnnamed');
     }
-    inputArea.placeholder = `例如：
-45,800
-32000
-18500`;
-    inputArea.inputMode = "decimal"
+    inputArea.placeholder = currencyCopy.placeholderUnnamed;
+    inputArea.inputMode = 'decimal';
   }
 }
 
-// 初始化時設定 UI
-updateUIForMode();
-
-// ===== v0.4.0: Denomination Configuration Management =====
-
-/**
- * 更新面額摘要文字（收合狀態顯示）
- */
-/**
- * 同步 UI checkbox 狀態與內部設定
- */
 function syncDenomCheckboxes() {
-  const activeDenoms = getActiveDenominations();
+  const activeDenoms = getActiveDenominations(currentCurrency);
   const config = getCurrentConfig();
-  
-  // 同步各面額 checkbox
-  DEFAULT_DENOMINATIONS.forEach(d => {
-    const checkbox = document.getElementById(`denom${d}`);
-    if (checkbox) {
-      checkbox.checked = activeDenoms.includes(d);
-    }
+
+  document.querySelectorAll('.denom-checkbox').forEach((checkbox) => {
+    checkbox.checked = activeDenoms.includes(Number(checkbox.dataset.value));
   });
-  
-  // 同步「記住偏好」checkbox
   saveDenomPreferenceCheckbox.checked = config.saveAsDefault;
-  
-  // 同步「全選」checkbox 狀態
+  enableCustomDenomCheckbox.checked = isCustomDenomEnabled(currentCurrency);
+  renderDefaultDenominationHint();
   updateSelectAllCheckboxes();
 }
 
-/**
- * 更新紙鈔/硬幣「全選」checkbox 的狀態（半選/全選/未選）
- */
 function updateSelectAllCheckboxes() {
-  // 紙鈔全選狀態
   const billCheckboxes = document.querySelectorAll('.denom-bill');
   const checkedBills = Array.from(billCheckboxes).filter(cb => cb.checked).length;
-  billsSelectAllCheckbox.checked = checkedBills === billCheckboxes.length;
-  billsSelectAllCheckbox.indeterminate = checkedBills > 0 && checkedBills < billCheckboxes.length;
-  
-  // 硬幣全選狀態
+  const billsSelectAllCheckbox = document.getElementById('billsSelectAll');
+  if (billsSelectAllCheckbox) {
+    billsSelectAllCheckbox.checked = billCheckboxes.length > 0 && checkedBills === billCheckboxes.length;
+    billsSelectAllCheckbox.indeterminate = checkedBills > 0 && checkedBills < billCheckboxes.length;
+  }
   const coinCheckboxes = document.querySelectorAll('.denom-coin');
   const checkedCoins = Array.from(coinCheckboxes).filter(cb => cb.checked).length;
-  coinsSelectAllCheckbox.checked = checkedCoins === coinCheckboxes.length;
-  coinsSelectAllCheckbox.indeterminate = checkedCoins > 0 && checkedCoins < coinCheckboxes.length;
+  const coinsSelectAllCheckbox = document.getElementById('coinsSelectAll');
+  if (coinsSelectAllCheckbox) {
+    coinsSelectAllCheckbox.checked = coinCheckboxes.length > 0 && checkedCoins === coinCheckboxes.length;
+    coinsSelectAllCheckbox.indeterminate = checkedCoins > 0 && checkedCoins < coinCheckboxes.length;
+  }
 }
 
-/**
- * 收集當前 UI 勾選的面額
- */
 function collectCheckedDenominations() {
   const checked = [];
   document.querySelectorAll('.denom-checkbox').forEach(cb => {
@@ -147,195 +246,156 @@ function collectCheckedDenominations() {
   return checked.sort((a, b) => b - a); // 由大到小排序
 }
 
-/**
- * 防空選檢查：至少保留一個面額
- */
 function preventEmptySelection() {
   const checked = collectCheckedDenominations();
   if (checked.length === 0) {
-    showToast('⚠️ 請至少保留一種面額進行計算！建議保留 1 元面額以確保完全拆解。', 3000, 'error');
+    showToast(t('keepOneSuggestion'), 3000, 'error');
     return false;
   }
   return true;
 }
 
-/**
- * 處理面額 checkbox 變更事件
- */
 function handleDenomCheckboxChange(event) {
   const checkbox = event.target;
   const denomValue = Number(checkbox.dataset.value);
-  
-  // 如果取消勾選，檢查是否會導致空選
+
   if (!checkbox.checked) {
     const otherChecked = collectCheckedDenominations().filter(d => d !== denomValue);
     if (otherChecked.length === 0) {
-      checkbox.checked = true; // 強制保持勾選
-      showToast('⚠️ 請至少保留一種面額進行計算！', 3000, 'error');
+      checkbox.checked = true;
+      showToast(t('emptySelection'), 3000, 'error');
       return;
     }
   }
-  
-  // 更新內部設定
+
   const newDenoms = collectCheckedDenominations();
-  setActiveDenominations(newDenoms);
-  
-  // 更新 UI 狀態
+  setActiveDenominations(newDenoms, currentCurrency);
   updateSelectAllCheckboxes();
-  
-  // GA4 事件追蹤
-  sendGaEvent('change_custom_denomination', {
-    denom_value: denomValue,
-    active: checkbox.checked
+  renderDefaultDenominationHint();
+
+  sendGaEvent('toggle_custom_denomination', {
+    enabled: checkbox.checked,
+    currency: currentCurrency
   });
 }
 
-/**
- * 處理「記住偏好」checkbox 變更事件
- */
 function handleSavePreferenceChange(event) {
   const enabled = event.target.checked;
   toggleSaveAsDefault(enabled);
-  
-  // GA4 事件追蹤
   sendGaEvent('toggle_save_denom_preference', {
     enabled: enabled
   });
-  
+
   if (enabled) {
-    showToast('✓ 已記住您的面額偏好設定', 2000, 'success');
+    showToast(currentLanguage === 'en-US' ? '✓ Preferences saved' : '✓ 已記住您的面額偏好設定', 2000, 'success');
   } else {
-    showToast('已清除面額偏好記憶', 2000, 'success');
+    showToast(currentLanguage === 'en-US' ? 'Preference memory cleared' : '已清除面額偏好記憶', 2000, 'success');
   }
 }
 
-/**
- * 處理紙鈔「全選」checkbox 變更事件
- */
-function handleBillsSelectAllChange(event) {
+function handleSelectAllChange(event, selector, eventSuffix) {
   const checked = event.target.checked;
-  document.querySelectorAll('.denom-bill').forEach(cb => {
+  document.querySelectorAll(selector).forEach(cb => {
     cb.checked = checked;
   });
-  
-  // 檢查防空選
+
   if (!preventEmptySelection()) {
-    // 如果會導致空選，撤銷操作
     event.target.checked = !checked;
-    document.querySelectorAll('.denom-bill').forEach(cb => {
+    document.querySelectorAll(selector).forEach(cb => {
       cb.checked = !checked;
     });
     return;
   }
-  
-  // 更新內部設定
+
   const newDenoms = collectCheckedDenominations();
-  setActiveDenominations(newDenoms);
-  
-  // 更新 UI 狀態
+  setActiveDenominations(newDenoms, currentCurrency);
   updateSelectAllCheckboxes();
-  
-  // GA4 事件追蹤
-  sendGaEvent('click_select_all_paper', {
-    action: 'select_all_paper'
+  renderDefaultDenominationHint();
+  sendGaEvent(`click_select_all_${eventSuffix}`, {
+    currency: currentCurrency
   });
 }
 
-/**
- * 處理硬幣「全選」checkbox 變更事件
- */
-function handleCoinsSelectAllChange(event) {
-  const checked = event.target.checked;
-  document.querySelectorAll('.denom-coin').forEach(cb => {
-    cb.checked = checked;
-  });
-  
-  // 檢查防空選
-  if (!preventEmptySelection()) {
-    // 如果會導致空選，撤銷操作
-    event.target.checked = !checked;
-    document.querySelectorAll('.denom-coin').forEach(cb => {
-      cb.checked = !checked;
-    });
-    return;
-  }
-  
-  // 更新內部設定
-  const newDenoms = collectCheckedDenominations();
-  setActiveDenominations(newDenoms);
-  
-  // 更新 UI 狀態
-  updateSelectAllCheckboxes();
-  
-  // GA4 事件追蹤
-  sendGaEvent('click_select_all_coin', {
-    action: 'select_all_coin'
-  });
-}
-
-/**
- * 處理主開關 checkbox 變更事件（v0.4.0）
- */
 function handleEnableCustomDenomChange(event) {
   const enabled = event.target.checked;
-  
+
   if (enabled) {
-    // 顯示面額設定面板
     denomPanelContent.classList.remove('hidden');
     defaultDenomHint.classList.add('hidden');
-    // 載入使用者自訂面額（若有 localStorage）
-    const config = loadDenomConfig();
-    if (config.activeDenominations && config.activeDenominations.length > 0) {
-      setActiveDenominations(config.activeDenominations);
-      syncDenomCheckboxes();
-    }
+    syncDenomCheckboxes();
   } else {
-    // 隱藏面額設定面板
     denomPanelContent.classList.add('hidden');
     defaultDenomHint.classList.remove('hidden');
-    // 注意：關閉時不重置 activeDenominations，保留使用者自訂設定
-    // 計算時會由 parseAndCompute() 根據 enabled 狀態決定使用預設或自訂面額
   }
-  
-  // GA4 事件追蹤
-  sendGaEvent('toggle_custom_denom_switch', {
-    enabled: enabled
+  setCustomDenomEnabled(enabled, currentCurrency);
+  sendGaEvent('toggle_custom_denomination', {
+    enabled,
+    currency: currentCurrency
   });
-  
-  // 儲存至 localStorage（若勾選「記住偏好」）
-  if (saveDenomPreferenceCheckbox.checked) {
-    saveDenomConfig({
-      enabled: enabled,
-      activeDenominations: getActiveDenominations(),
-      saveAsDefault: true
-    });
-  }
 }
 
-// 初始化面額設定
-const savedConfig = loadDenomConfig();
-syncDenomCheckboxes();
-
-// 初始化主開關狀態（v0.4.0）
-enableCustomDenomCheckbox.checked = savedConfig.enabled || false;
-if (savedConfig.enabled) {
-  denomPanelContent.classList.remove('hidden');
-  defaultDenomHint.classList.add('hidden');
-} else {
-  denomPanelContent.classList.add('hidden');
-  defaultDenomHint.classList.remove('hidden');
+function updateStaticTexts() {
+  const currencyCopy = buildCurrencyAwareCopy(currentCurrency, currentLanguage, hasNameFlagCheckbox.checked);
+  document.documentElement.lang = currentLanguage === 'en-US' ? 'en-US' : 'zh-Hant';
+  document.title = `${t('appTitle')} v0.5.0`;
+  document.querySelector('meta[name="description"]')?.setAttribute('content', t('appDescription'));
+  setText('appTitle', t('appTitle'));
+  setText('privacyTitle', t('privacyTitle'));
+  setText('privacyBody', t('privacyBody'));
+  setText('languageLabel', t('languageLabel'));
+  setText('currencyLabel', t('currencyLabel'));
+  setText('hasNameFlagText', t('hasNameFlag'));
+  setText('csvImportBtnText', t('csvImport'));
+  setText('downloadSampleBtnText', t('csvSample'));
+  setText('csvHintTitle', t('csvHintTitle'));
+  setText('csvHintLine1', `• ${currencyCopy.csvHintLine1}`);
+  setText('csvHintLine2', `• ${t('csvHintLine2')}`);
+  setText('csvHintLine3', `• ${t('csvHintLine3')}`);
+  setText('savePreferenceText', t('savePreference'));
+  setText('bankTotalsTitle', t('bankTotalsTitle'));
+  setText('totalAmountLabel', t('totalAmount'));
+  setText('totalAmountUnit', currentLanguage === 'en-US' ? currentCurrency : '元');
+  setText('totalCountLabel', t('totalCount'));
+  setText('totalCountUnit', currentLanguage === 'en-US' ? 'rows' : '筆');
+  setText('personTitle', t('personTitle'));
+  setText('tableName', t('tableName'));
+  setText('tableAmount', t('tableAmount'));
+  setText('tableBreakdown', t('tableBreakdown'));
+  setText('disclaimerTitle', t('disclaimerTitle'));
+  setText('disclaimerLine1', t('disclaimerLine1'));
+  setText('disclaimerLine2', t('disclaimerLine2'));
+  calcBtn.textContent = t('calculate');
+  clearBtn.textContent = t('clearAll');
+  copyBankBtn.textContent = t('copyBank');
+  exportBtn.textContent = t('exportImage');
+  setText('exportCsvBtnText', t('exportCsv'));
+  const customDenomLabel = enableCustomDenomCheckbox.parentElement?.querySelector('span');
+  if (customDenomLabel) customDenomLabel.textContent = t('customDenomToggle');
 }
 
-// 綁定面額面板事件監聽器
+function applyLanguageAndCurrencyUI() {
+  setI18nLanguage(currentLanguage);
+  languageSelect.value = currentLanguage;
+  currencySelect.value = currentCurrency;
+  updateStaticTexts();
+  updateUIForMode();
+  renderDenominationControls();
+  renderDefaultDenominationHint();
+  renderBankTotalsGrid();
+  const enabled = isCustomDenomEnabled(currentCurrency);
+  enableCustomDenomCheckbox.checked = enabled;
+  denomPanelContent.classList.toggle('hidden', !enabled);
+  defaultDenomHint.classList.toggle('hidden', enabled);
+}
+
+loadDenomConfig();
+currentLanguage = getConfigLanguage();
+currentCurrency = getCurrentCurrency();
+applyLanguageAndCurrencyUI();
+saveDenomPreferenceCheckbox.checked = getCurrentConfig().saveAsDefault;
+
 enableCustomDenomCheckbox.addEventListener('change', handleEnableCustomDenomChange);
-document.querySelectorAll('.denom-checkbox').forEach(cb => {
-  cb.addEventListener('change', handleDenomCheckboxChange);
-});
 saveDenomPreferenceCheckbox.addEventListener('change', handleSavePreferenceChange);
-billsSelectAllCheckbox.addEventListener('change', handleBillsSelectAllChange);
-coinsSelectAllCheckbox.addEventListener('change', handleCoinsSelectAllChange);
-
-// ===== End of Denomination Configuration Management =====
 
 /**
  * 安全地發送 GA 事件的輔助函式
@@ -344,17 +404,28 @@ coinsSelectAllCheckbox.addEventListener('change', handleCoinsSelectAllChange);
  * @param {Object|string} params - 事件參數（物件或字串）
  */
 function sendGaEvent(eventName, params) {
+  const allowedAnonymousEvents = new Set([
+    'change_language',
+    'change_currency',
+    'toggle_custom_denomination'
+  ]);
+  const sanitizedParams = typeof params === 'object' && params !== null ? { ...params } : params;
+  if (allowedAnonymousEvents.has(eventName) && typeof sanitizedParams === 'object') {
+    delete sanitizedParams.name;
+    delete sanitizedParams.amount;
+    delete sanitizedParams.raw;
+    delete sanitizedParams.detail;
+  }
   if (typeof window.gtag === 'function') {
-    // 如果參數是物件，直接使用；否則當作 event_label
-    const eventParams = typeof params === 'object' 
-      ? Object.assign({ event_category: 'engagement' }, params)
+    const eventParams = typeof sanitizedParams === 'object' 
+      ? Object.assign({ event_category: 'engagement' }, sanitizedParams)
       : {
           event_category: 'engagement',
-          event_label: params
+          event_label: sanitizedParams
         };
     window.gtag('event', eventName, eventParams);
   } else {
-    const paramsStr = typeof params === 'object' ? JSON.stringify(params) : params;
+    const paramsStr = typeof sanitizedParams === 'object' ? JSON.stringify(sanitizedParams) : sanitizedParams;
     console.log(`[GA Simulation] Event: ${eventName}, Params: ${paramsStr}`);
   }
 }
@@ -432,24 +503,17 @@ function showToast(message, duration = 2000, type = 'success') {
 function formatBankListText() {
   const totalAmount = document.getElementById('totalAmount').textContent;
   const totalCount = document.getElementById('totalCount').textContent;
-  const d1000 = document.getElementById('d1000').textContent;
-  const d500 = document.getElementById('d500').textContent;
-  const d100 = document.getElementById('d100').textContent;
-  const d50 = document.getElementById('d50').textContent;
-  const d10 = document.getElementById('d10').textContent;
-  const d5 = document.getElementById('d5').textContent;
-  const d1 = document.getElementById('d1').textContent;
-  
-  return `【銀行領款總需求】
-總金額：${totalAmount} 元 | 總筆數：${totalCount} 筆
+  const profile = getCurrentProfile();
+  const lines = getCurrentCalculationDenominations().map((denom) => {
+    const unit = profile.defaultBanknotes.includes(denom) ? t('unitsBill') : t('unitsCoin');
+    const value = document.getElementById(getDenomElementId(denom))?.textContent || '0';
+    return `${formatDenominationValue(denom)}：${value} ${unit}`;
+  });
 
-1000元：${d1000} 張
-500元：${d500} 張
-100元：${d100} 張
-50元：${d50} 個
-10元：${d10} 個
-5元：${d5} 個
-1元：${d1} 個`;
+  return `${t('bankTotalsTitle')}
+${t('totalAmount')}：${totalAmount} ${currentLanguage === 'en-US' ? currentCurrency : '元'} | ${t('totalCount')}：${totalCount} ${currentLanguage === 'en-US' ? 'rows' : '筆'}
+
+${lines.join('\n')}`;
 }
 
 /**
@@ -462,7 +526,7 @@ async function copyBankListToClipboard() {
     // 嘗試使用 Clipboard API
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
-      showToast('✓ 已複製銀行領款單', 2000, 'success');
+      showToast(t('copiedBank'), 2000, 'success');
       sendGaEvent('click_copy_bank', '一鍵複製銀行領款單');
     } else {
       // Fallback: 使用 execCommand (deprecated but more compatible)
@@ -476,7 +540,7 @@ async function copyBankListToClipboard() {
       document.body.removeChild(textarea);
       
       if (success) {
-        showToast('✓ 已複製', 2000, 'success');
+        showToast(t('copiedBank'), 2000, 'success');
         sendGaEvent('click_copy_bank', '一鍵複製銀行領款單');
       } else {
         throw new Error('execCommand failed');
@@ -484,42 +548,31 @@ async function copyBankListToClipboard() {
     }
   } catch (error) {
     console.error('Copy failed:', error);
-    showToast('✗ 複製失敗，請手動複製', 3000, 'error');
-    // 顯示純文字讓使用者手動複製
-    alert('自動複製失敗，請手動複製以下內容：\n\n' + formatBankListText());
+    showToast(t('copyFailed'), 3000, 'error');
+    alert(`${t('copyFailed')}\n\n${formatBankListText()}`);
   }
 }
 
 function clearAll() {
-  if (!confirm('確定要清除所有資料？此動作無法復原。')) return;
+  if (!confirm(t('clearConfirm'))) return;
   inputArea.value = '';
-  tbody.innerHTML = '';
-  // v0.4.0: 清除所有 10 種面額顯示
-  ['d2000','d1000','d500','d200','d100','d50','d20','d10','d5','d1','totalAmount','totalCount'].forEach(id=>document.getElementById(id).textContent='0');
+  clearResults();
   errorMsg.textContent = '';
-  calcTimestampEl.textContent = ''; // Clear timestamp
-  csvSourceLabel.textContent = ''; // Clear CSV source label
+  calcTimestampEl.textContent = '';
+  csvSourceLabel.textContent = '';
   isDataValidForExport = false;
   localStorage.removeItem(saveKey);
   updateButtonStates(); // Update button states after clearing
 }
 
 function numberWithCommas(s){
-  // s is string of digits with optional leading -
   return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
-function formatAmount(v){
-  if (typeof v === 'bigint') return numberWithCommas(v.toString());
-  if (typeof v === 'number') return Number(v).toLocaleString();
-  if (typeof v === 'string') return v;
-  return String(v);
-}
 
-// 清空結果顯示區域（當驗證失敗時使用）
 function clearResults() {
   tbody.innerHTML = '';
-  DEFAULT_DENOMINATIONS.forEach(d => {
-    const spanId = `d${d}`;
+  getCurrencyDenominations(currentCurrency).forEach(d => {
+    const spanId = getDenomElementId(d);
     const spanEl = document.getElementById(spanId);
     if (spanEl) {
       spanEl.textContent = '0';
@@ -532,23 +585,21 @@ function clearResults() {
 // 僅渲染結果到 UI（驗證通過後才調用）
 function renderResultsToUI(bank, denom) {
   tbody.innerHTML = '';
+  const profile = getCurrentProfile();
   
   for (const p of bank.perPerson){
     const rowDenom = p.breakdown;
-    const personSum = p.total; // may be BigInt or number
     const tr = document.createElement('tr');
-    // create badge-style breakdown for readability (v0.4.0: 僅顯示啟用的面額)
     const breakdownHtml = denom.map(d => {
       const c = rowDenom[d] || 0;
-      return `<span class="inline-block bg-gray-100 text-gray-800 px-2 py-0.5 rounded mr-1 text-xs">${d}×${c}</span>`;
+      return `<span class="inline-block bg-gray-100 text-gray-800 px-2 py-0.5 rounded mr-1 text-xs">${formatDenominationValue(d)}×${c}</span>`;
     }).join('');
-    tr.innerHTML = `<td class="p-2">${p.name}</td><td class="p-2 text-center">${formatAmount(p.total)}</td><td class="p-2 text-sm">${breakdownHtml}</td>`;
+    tr.innerHTML = `<td class="p-2">${p.name}</td><td class="p-2 text-center">${formatAmount(p.total, currentCurrency)}</td><td class="p-2 text-sm">${breakdownHtml}</td>`;
     tbody.appendChild(tr);
   }
 
-  // render totals (formatted) - v0.4.0: 動態更新所有面額（若未啟用則顯示 0）
-  DEFAULT_DENOMINATIONS.forEach(d => {
-    const spanId = `d${d}`;
+  getCurrencyDenominations(currentCurrency).forEach(d => {
+    const spanId = getDenomElementId(d);
     const spanEl = document.getElementById(spanId);
     if (spanEl) {
       const count = bank.totals[d] || 0;
@@ -556,15 +607,14 @@ function renderResultsToUI(bank, denom) {
     }
   });
   
-  document.getElementById('totalAmount').textContent = formatAmount(bank.totalAmount);
+  document.getElementById('totalAmount').textContent = formatAmount(bank.totalAmount, currentCurrency);
   document.getElementById('totalCount').textContent = bank.perPerson.length.toLocaleString();
 }
 
 function renderResults(entries) {
-  // Legacy function for backward compatibility - computes and renders
-  const denom = getActiveDenominations();
+  const denom = getCurrentCalculationDenominations();
   const people = aggregateEntries(entries);
-  const bank = computeBankTotals(people, denom);
+  const bank = computeBankTotals(people, denom, { currencyCode: currentCurrency });
   renderResultsToUI(bank, denom);
   return bank;
 }
@@ -601,7 +651,7 @@ function parseAndCompute() {
   
   const text = inputArea.value;
   if (!text || text.trim().length === 0) { 
-    alert('請貼上資料後再執行計算。'); 
+    alert(t('emptyInputAlert')); 
     updateButtonStates();
     return; 
   }
@@ -610,24 +660,25 @@ function parseAndCompute() {
   const hasNameFlag = hasNameFlagCheckbox.checked;
   
   // 傳入 hasNameFlag 參數到 parser
-  const result = parseInput(text, hasNameFlag);
+  const result = parseInput(text, hasNameFlag, {
+    currencyCode: currentCurrency,
+    buildItemName: formatItemLabel
+  });
   if (result.error) {
-    errorMsg.textContent = `第 ${result.error.line} 行錯誤：${result.error.message} （${result.error.raw}）`;
-    // Auto-select (highlight) the error line
+    errorMsg.textContent = t('rowError', {
+      line: result.error.line,
+      message: localizeParseError(result.error, currentLanguage),
+      raw: result.error.raw
+    });
     selectLineInTextarea(inputArea, result.error.line);
-    clearResults(); // 清空結果顯示
+    clearResults();
     updateButtonStates();
     return;
   }
 
-  // 先計算銀行需求（用於驗證），但尚未渲染到畫面
-  // v0.4.0: 根據主開關判斷使用哪組面額
-  const enableCustomDenom = enableCustomDenomCheckbox?.checked ?? false;
-  const denom = enableCustomDenom 
-    ? getActiveDenominations()  // 自訂面額
-    : DEFAULT_ACTIVE_DENOMINATIONS;  // 預設面額
+  const denom = getCurrentCalculationDenominations();
   const people = aggregateEntries(result.entries);
-  const bank = computeBankTotals(people, denom);
+  const bank = computeBankTotals(people, denom, { currencyCode: currentCurrency });
   
   // 驗證 — 支援 BigInt 與 Number
   const inputSumRaw = result.inputSum;
@@ -640,8 +691,8 @@ function parseAndCompute() {
     const totalVal = p.total;
     const asBig = (typeof totalVal === 'bigint') ? totalVal : BigInt(Math.round(Number(totalVal) || 0));
     if (asBig > BigInt(MAX_PER_PERSON)) {
-      errorMsg.textContent = `✗ 驗證錯誤：${p.name} 的累計金額超過單人上限 ${MAX_PER_PERSON}`;
-      clearResults(); // 清空結果顯示
+      errorMsg.textContent = `✗ ${localizeValidationError('PER_PERSON_LIMIT', { name: p.name, max: MAX_PER_PERSON }, currentLanguage)}`;
+      clearResults();
       exportBtn.disabled = true;
       saveState({ input: inputArea.value, lastParsedAt: new Date().toISOString(), parsedEntries: result.entries, bank, lastValid: false });
       updateButtonStates();
@@ -650,8 +701,8 @@ function parseAndCompute() {
   }
   const totalAsBig = (typeof breakdownSumRaw === 'bigint') ? breakdownSumRaw : BigInt(Math.round(Number(breakdownSumRaw) || 0));
   if (totalAsBig > BigInt(MAX_TOTAL)) {
-    errorMsg.textContent = `✗ 驗證錯誤：總額超過上限 ${MAX_TOTAL}`;
-    clearResults(); // 清空結果顯示
+    errorMsg.textContent = `✗ ${localizeValidationError('TOTAL_LIMIT', { max: MAX_TOTAL }, currentLanguage)}`;
+    clearResults();
     exportBtn.disabled = true;
     saveState({ input: inputArea.value, lastParsedAt: new Date().toISOString(), parsedEntries: result.entries, bank, lastValid: false });
     updateButtonStates();
@@ -663,8 +714,8 @@ function parseAndCompute() {
     verifyDoubleEntry(inputSumRaw, breakdownSumRaw);
     valid = true;
   } catch (error) {
-    errorMsg.textContent = `✗ ${error.message}`;
-    clearResults(); // 清空結果顯示
+    errorMsg.textContent = `✗ ${localizeBankError(error, currentLanguage)}`;
+    clearResults();
     exportBtn.disabled = true;
     saveState({ input: inputArea.value, lastParsedAt: new Date().toISOString(), parsedEntries: result.entries, bank, lastValid: false });
     updateButtonStates();
@@ -679,18 +730,19 @@ function parseAndCompute() {
     exportBtn.disabled = false;
     isDataValidForExport = true; // Set validation state to true
     
-    // Store latest summary result for CSV export
     latestSummaryResult = {
-      totalAmount: Number(bank.totalAmount),
+      currencyCode: currentCurrency,
       totalCount: bank.perPerson.length,
       bankTotals: bank.totals,
       items: bank.perPerson.map(p => ({
         person: {
           name: p.name,
-          amount: Number(p.total)
+          amount: formatAmount(p.total, currentCurrency)
         },
         breakdown: p.breakdown
-      }))
+      })),
+      totalAmount: formatAmount(bank.totalAmount, currentCurrency),
+      rawTotalAmount: String(bank.totalAmount)
     };
     
     // Update timestamp display
@@ -698,7 +750,7 @@ function parseAndCompute() {
     const pad = (n) => String(n).padStart(2, '0');
     const timeStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     const timestampISO = now.toISOString();
-    calcTimestampEl.textContent = `計算時間：${timeStr}`;
+    calcTimestampEl.textContent = `${t('calculateAt')}：${timeStr}`;
     
     // Store timestamp in state for restoration
     saveState({
@@ -708,17 +760,20 @@ function parseAndCompute() {
       parsedEntries: result.entries,
       bank: bank,
       lastValid: valid,
-      hasNameFlag: hasNameFlag
+      hasNameFlag: hasNameFlag,
+      currency: currentCurrency,
+      language: currentLanguage
     });
   } else {
-    // Save invalid state without timestamp
     saveState({
       input: inputArea.value,
       lastParsedAt: new Date().toISOString(),
       parsedEntries: result.entries,
       bank: bank,
       lastValid: valid,
-      hasNameFlag: hasNameFlag
+      hasNameFlag: hasNameFlag,
+      currency: currentCurrency,
+      language: currentLanguage
     });
   }
 
@@ -741,13 +796,39 @@ clearBtn.addEventListener('click', () => {
 // 模式切換 checkbox 事件
 hasNameFlagCheckbox.addEventListener('change', () => {
   const hasNameFlag = hasNameFlagCheckbox.checked;
-  // 觸發 GA 事件：切換模式
   sendGaEvent('toggle_name_mode', `hasNameFlag=${hasNameFlag}`);
-  // 更新 UI 提示
+  updateStaticTexts();
   updateUIForMode();
-  // 清除錯誤訊息與高亮
   errorMsg.textContent = '';
   inputArea.classList.remove('error-highlight');
+});
+
+languageSelect.addEventListener('change', () => {
+  currentLanguage = languageSelect.value;
+  setConfigLanguage(currentLanguage);
+  setI18nLanguage(currentLanguage);
+  applyLanguageAndCurrencyUI();
+  if (calcTimestampEl.textContent) {
+    const text = calcTimestampEl.textContent.split('：').slice(1).join('：') || calcTimestampEl.textContent.split(':').slice(1).join(':');
+    calcTimestampEl.textContent = text ? `${t('calculateAt')}：${text.trim()}` : '';
+  }
+  if (inputArea.value.trim()) {
+    parseAndCompute();
+  }
+  sendGaEvent('change_language', { lang: currentLanguage });
+});
+
+currencySelect.addEventListener('change', () => {
+  currentCurrency = currencySelect.value;
+  setCurrentCurrency(currentCurrency);
+  applyLanguageAndCurrencyUI();
+  clearResults();
+  if (inputArea.value.trim()) {
+    parseAndCompute();
+  } else {
+    updateButtonStates();
+  }
+  sendGaEvent('change_currency', { currency: currentCurrency });
 });
 
 // 一鍵複製銀行領款單事件
@@ -758,12 +839,12 @@ copyBankBtn.addEventListener('click', () => {
 // Download CSV sample button
 downloadSampleBtn.addEventListener('click', () => {
   try {
-    downloadSampleCsv();
+    downloadSampleCsv({ currencyCode: currentCurrency, language: currentLanguage });
     sendGaEvent('click_download_sample', 'Data_Import');
-    showToast('✓ 已下載範例 CSV 檔案', 2000, 'success');
+    showToast(t('downloadSampleSuccess'), 2000, 'success');
   } catch (error) {
     console.error('[App] 下載範例失敗:', error);
-    showToast('✗ 下載失敗，請稍後再試', 3000, 'error');
+    showToast(t('downloadFailed'), 3000, 'error');
   }
 });
 
@@ -779,7 +860,7 @@ csvFileInput.addEventListener('change', (e) => {
   
   // Validate file type
   if (!file.name.toLowerCase().endsWith('.csv')) {
-    showToast('✗ 請選擇 CSV 檔案', 3000, 'error');
+    showToast(currentLanguage === 'en-US' ? '✗ Please select a CSV file' : '✗ 請選擇 CSV 檔案', 3000, 'error');
     csvFileInput.value = ''; // Reset input
     return;
   }
@@ -787,7 +868,7 @@ csvFileInput.addEventListener('change', (e) => {
   // Validate file size (1MB limit)
   const maxSize = 1 * 1024 * 1024; // 1MB
   if (file.size > maxSize) {
-    showToast('✗ 檔案過大（上限 1MB）', 3000, 'error');
+    showToast(currentLanguage === 'en-US' ? '✗ File too large (max 1MB)' : '✗ 檔案過大（上限 1MB）', 3000, 'error');
     csvFileInput.value = ''; // Reset input
     return;
   }
@@ -796,8 +877,6 @@ csvFileInput.addEventListener('change', (e) => {
   
   parseCsvFile(file, hasNameFlag, 
     (parsedItems) => {
-      // Success callback
-      // Convert to text format and populate textarea
       const textLines = parsedItems.map(item => {
         if (hasNameFlag) {
           return `${item.name},${item.amount}`;
@@ -807,58 +886,57 @@ csvFileInput.addEventListener('change', (e) => {
       });
       inputArea.value = textLines.join('\n');
       
-      // Display CSV source filename
-      csvSourceLabel.textContent = `資料來源由 ${file.name} 匯入`;
+      csvSourceLabel.textContent = t('importedFrom', { file: file.name });
       
-      // Save state and trigger calculation
       saveState({ 
         input: inputArea.value,
-        hasNameFlag: hasNameFlag
+        hasNameFlag: hasNameFlag,
+        currency: currentCurrency,
+        language: currentLanguage
       });
       
       updateButtonStates();
       
-      showToast(`✓ 成功匯入 ${parsedItems.length} 筆資料`, 2000, 'success');
+      showToast(t('importCsvSuccess', { count: parsedItems.length }), 2000, 'success');
       sendGaEvent('click_import_csv', 'Data_Import');
+      parseAndCompute();
       
-      // Reset file input
       csvFileInput.value = '';
     },
     (errorMessage) => {
-      // Error callback
       showToast(`✗ ${errorMessage}`, 8000, 'error');
       csvFileInput.value = ''; // Reset input
-    }
+    },
+    { currencyCode: currentCurrency, language: currentLanguage }
   );
 });
 
 // Export CSV button
 exportCsvBtn.addEventListener('click', () => {
   if (!latestSummaryResult) {
-    showToast('✗ 目前沒有可匯出的計算結果', 3000, 'error');
+    showToast(t('noExportData'), 3000, 'error');
     return;
   }
   
   exportResultsToCsv(latestSummaryResult,
     () => {
-      // Success callback
-      showToast('✓ CSV 檔案已下載', 2000, 'success');
+      showToast(t('exportCsvSuccess'), 2000, 'success');
       sendGaEvent('click_export_csv', 'Export');
     },
     (errorMessage) => {
-      // Error callback
       showToast(`✗ ${errorMessage}`, 4000, 'error');
-    }
+    },
+    { currencyCode: currentCurrency, language: currentLanguage }
   );
 });
 
 function formatDateForWatermark(d){
   const pad=(n)=>String(n).padStart(2,'0');
-  return `圖片匯出時間：${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${t('calculateAt')}：${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 exportBtn.addEventListener('click', async ()=>{
-  if (typeof html2canvas === 'undefined') { alert('html2canvas 尚未載入'); return; }
+  if (typeof html2canvas === 'undefined') { alert(t('exportUnavailable')); return; }
 
   // 觸發 GA 事件：點擊匯出明細圖片
   sendGaEvent('click_export_image', '匯出明細圖');
@@ -1000,10 +1078,9 @@ exportBtn.addEventListener('click', async ()=>{
     try{ saveState({ lastExportAt: new Date().toISOString() }); }catch(e){/*ignore*/}
     
   } catch (error) {
-    // On error, ensure flash is removed and elements are restored
     console.error('Export failed:', error);
     shutterFlash.classList.remove('active');
-    alert('匯出失敗，請重試');
+    alert(t('exportFailed'));
   }
 });
 
@@ -1018,68 +1095,37 @@ inputArea.addEventListener('input', ()=>{
   updateButtonStates(); // Update button states on input change
 });
 
-// 載入先前狀態
 const prev = loadState();
 if (prev && prev.input) {
   inputArea.value = prev.input;
+  if (prev.language) {
+    currentLanguage = prev.language;
+    setConfigLanguage(currentLanguage);
+  }
+  if (prev.currency) {
+    currentCurrency = prev.currency;
+    setCurrentCurrency(currentCurrency);
+  }
+  applyLanguageAndCurrencyUI();
   
-  // Restore checkbox state if available
   if (prev.hasOwnProperty('hasNameFlag')) {
     hasNameFlagCheckbox.checked = prev.hasNameFlag;
-    updateUIForMode(); // Update UI based on restored mode
+    updateUIForMode();
   }
   
-  // Restore UI from saved state if available
-  if (prev.bank && prev.lastValid) {
+  if (prev.lastValid) {
     setTimeout(() => {
       try {
-        // Restore results display
-        const bank = prev.bank;
-        tbody.innerHTML = '';
-        const denom = [1000,500,100,50,10,5,1];
-        
-        for (const p of bank.perPerson) {
-          const rowDenom = p.breakdown;
-          const tr = document.createElement('tr');
-          const breakdownHtml = denom.map(d => {
-            const c = rowDenom[d] || 0;
-            return `<span class="inline-block bg-gray-100 text-gray-800 px-2 py-0.5 rounded mr-1 text-xs">${d}×${c}</span>`;
-          }).join('');
-          tr.innerHTML = `<td class="p-2">${p.name}</td><td class="p-2 text-center">${formatAmount(p.total)}</td><td class="p-2 text-sm">${breakdownHtml}</td>`;
-          tbody.appendChild(tr);
-        }
-        
-        // Restore totals
-        document.getElementById('d1000').textContent = (bank.totals[1000] || 0).toLocaleString();
-        document.getElementById('d500').textContent = (bank.totals[500] || 0).toLocaleString();
-        document.getElementById('d100').textContent = (bank.totals[100] || 0).toLocaleString();
-        document.getElementById('d50').textContent = (bank.totals[50] || 0).toLocaleString();
-        document.getElementById('d10').textContent = (bank.totals[10] || 0).toLocaleString();
-        document.getElementById('d5').textContent = (bank.totals[5] || 0).toLocaleString();
-        document.getElementById('d1').textContent = (bank.totals[1] || 0).toLocaleString();
-        document.getElementById('totalAmount').textContent = formatAmount(bank.totalAmount);
-        document.getElementById('totalCount').textContent = (bank.perPerson.length || 0).toLocaleString();
-        
-        // Restore timestamp if available
-        if (prev.calcTimestamp) {
-          calcTimestampEl.textContent = `計算時間：${prev.calcTimestamp}`;
-        }
-        
-        // Restore validation state
-        isDataValidForExport = true;
-        exportBtn.disabled = false;
-        updateButtonStates();
+        parseAndCompute();
       } catch (e) {
         console.warn('restore state failed', e);
         updateButtonStates();
       }
     }, 50);
   } else {
-    // If no valid saved state, just update button states
     setTimeout(() => updateButtonStates(), 50);
   }
 } else {
-  // No previous data, initialize button states
   updateButtonStates();
 }
 
