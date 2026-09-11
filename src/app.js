@@ -19,7 +19,7 @@ import {
 } from './denomination-config.js';
 import { getCurrencyDenominations, getCurrencyProfile, descaleAmount } from './currency.js';
 import { t, setLanguage as setI18nLanguage } from './i18n.js';
-import { buildCurrencyAwareCopy } from './currency-copy.js';
+import { buildCurrencyAwareCopy } from './currency-examples.js';
 import { localizeBankError, localizeParseError, localizeValidationError } from './error-messages.js';
 
 const inputArea = document.getElementById('inputArea');
@@ -978,10 +978,11 @@ exportBtn.addEventListener('click', async ()=>{
     const csvSourceLabel = document.getElementById('csvSourceLabel'); // CSV 來源標籤 (v0.4.0)
     const csvButtonsSection = document.getElementById('csvButtonsSection'); // CSV 按鈕區塊 (v0.4.0)
     const csvFormatHint = document.getElementById('csvFormatHint'); // CSV 格式提示 (v0.4.0)
+    const headerControls = document.getElementById('headerControls'); // 語系/幣別切換區塊
     const denomSwitchSection = document.getElementById('denomSwitchSection'); // 自訂面額主開關區塊 (v0.4.0)
     const denomPanelSection = document.getElementById('denomPanelSection'); // 自訂面額設定面板 (v0.4.0)
 
-    // hide export button, bottom control buttons, error message, timestamp, checkbox, format notice, copy button, CSV elements, and denom sections - use visibility to prevent layout jump
+    // hide export button, controls, error message, CSV hints, and denomination config during export
     const prevExportVisibility = exportBtn.style.visibility;
     const prevClearBtnVisibility = clearBtn.style.display;
     const prevCalcBtnVisibility = calcBtn.style.display;
@@ -994,6 +995,7 @@ exportBtn.addEventListener('click', async ()=>{
     const prevCsvLabelVisibility = csvSourceLabel ? csvSourceLabel.style.visibility : null;
     const prevCsvButtonsVisibility = csvButtonsSection ? csvButtonsSection.style.display : null;
     const prevCsvFormatHintVisibility = csvFormatHint ? csvFormatHint.style.display : null;
+    const prevHeaderControlsVisibility = headerControls ? headerControls.style.display : null;
     const prevDenomSwitchVisibility = denomSwitchSection ? denomSwitchSection.style.display : null;
     const prevDenomPanelVisibility = denomPanelSection ? denomPanelSection.style.display : null;
     
@@ -1009,6 +1011,7 @@ exportBtn.addEventListener('click', async ()=>{
     if (csvSourceLabel) csvSourceLabel.style.visibility = 'hidden';
     if (csvButtonsSection) csvButtonsSection.style.display = 'none';
     if (csvFormatHint) csvFormatHint.style.display = 'none';
+    if (headerControls) headerControls.style.display = 'none';
     if (denomSwitchSection) denomSwitchSection.style.display = 'none';
     if (denomPanelSection) denomPanelSection.style.display = 'none';
     textarea.parentNode.replaceChild(replacement, textarea);
@@ -1062,6 +1065,7 @@ exportBtn.addEventListener('click', async ()=>{
     if (csvSourceLabel) csvSourceLabel.style.visibility = prevCsvLabelVisibility || '';
     if (csvButtonsSection) csvButtonsSection.style.display = prevCsvButtonsVisibility || '';
     if (csvFormatHint) csvFormatHint.style.display = prevCsvFormatHintVisibility || '';
+    if (headerControls) headerControls.style.display = prevHeaderControlsVisibility || '';
     if (denomSwitchSection) denomSwitchSection.style.display = prevDenomSwitchVisibility || '';
     if (denomPanelSection) denomPanelSection.style.display = prevDenomPanelVisibility || '';
 

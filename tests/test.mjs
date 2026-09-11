@@ -12,9 +12,10 @@ import {
 import {
   setLanguage as setI18nLanguage,
   getLanguage as getI18nLanguage,
-  t
+  t,
+  dictionaries
 } from '../src/i18n.js';
-import { buildCurrencyAwareCopy, getCurrencyExamples } from '../src/currency-copy.js';
+import { buildCurrencyAwareCopy, getCurrencyExamples } from '../src/currency-examples.js';
 import { localizeBankError, localizeParseError, localizeValidationError } from '../src/error-messages.js';
 import {
   loadDenomConfig,
@@ -313,6 +314,8 @@ console.log('Multi-currency scaling tests passed.');
 
 console.log('Running i18n tests...');
 assert.strictEqual(getI18nLanguage(), 'zh-TW');
+assert.strictEqual(dictionaries['zh-TW'].appTitle, '幫你算兌 Money Snap - 兌幣計算機');
+assert.strictEqual(dictionaries['en-US'].calculate, 'Calculate');
 assert.strictEqual(t('appTitle'), '幫你算兌 Money Snap - 兌幣計算機');
 setI18nLanguage('en-US');
 assert.strictEqual(getI18nLanguage(), 'en-US');

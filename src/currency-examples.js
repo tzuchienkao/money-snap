@@ -1,4 +1,4 @@
-// src/currency-copy.js
+// src/currency-examples.js
 // 依語系與幣別產生 UI 提示與範例文案
 
 import { getCurrencyProfile } from './currency.js';
