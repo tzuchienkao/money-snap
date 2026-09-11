@@ -4,6 +4,8 @@
 // - breakdownAmount(amount, denominations) -> { breakdown: {denom: count}, remainder }
 // - aggregateBreakdowns(breakdowns) -> { totals: {denom: totalCount}, totalAmount }
 
+import { getCurrencyProfile, toMinorUnitDenominations } from './currency.js';
+
 /**
  * @typedef {1000|500|100|50|10|5|1} Denomination
  * 合法的面額值（新台幣）
@@ -53,17 +55,37 @@
  * breakdownAmount(185, [1000, 500, 100, 10, 5, 1])
  * // => { breakdown: {1000:0, 500:0, 100:1, 10:8, 5:1, 1:0}, remainder:0 }
  */
-export function breakdownAmount(amount, denominations = [1000,500,100,50,10,5,1]){
+export function breakdownAmount(amount, denominations = [1000,500,100,50,10,5,1], options = {}){
   // 防呆檢查：面額陣列不可為空
   if (!Array.isArray(denominations) || denominations.length === 0) {
     throw new Error('[Money Snap] 請至少選擇一種有效面額進行計算！');
   }
-  
-  // 安全防呆：強制將啟用面額進行「由大至小」降冪排序
-  const sortedDenoms = [...denominations].sort((a, b) => b - a);
+
+  const profile = options.currencyProfile || getCurrencyProfile(options.currencyCode || 'TWD');
+  const usesMinorUnits = profile.decimals > 0;
+  const sortedDenoms = usesMinorUnits
+    ? toMinorUnitDenominations(denominations, profile)
+    : [...denominations].sort((a, b) => b - a);
   
   const breakdown = {};
-  // support BigInt and Number
+  // support scaled bigint for decimal currencies and BigInt/Number for integer currencies
+  if (usesMinorUnits) {
+    const scaledAmount = typeof amount === 'bigint' ? amount : BigInt(Math.round(Number(amount) * (10 ** profile.decimals)));
+    let remainder = scaledAmount;
+    for (const denom of sortedDenoms) {
+      const scaledDenom = BigInt(denom.scaled);
+      const count = remainder / scaledDenom;
+      breakdown[denom.original] = Number(count);
+      remainder = remainder % scaledDenom;
+    }
+
+    if (remainder > 0n) {
+      console.warn(`[Money Snap] 金額 ${amount} 在當前面額組合下殘留 ${remainder} 個最小貨幣單位無法完全拆解。`);
+    }
+
+    return { breakdown, remainder };
+  }
+
   const isBig = (typeof amount === 'bigint');
   if (isBig) {
     let remainder = amount;
@@ -127,12 +149,29 @@ export function breakdownAmount(amount, denominations = [1000,500,100,50,10,5,1]
  * ], [1000, 500, 100, 10, 5, 1])
  * // => { totals: {1000:0, 500:0, 100:1, 10:8, 5:1, 1:0}, totalAmount: 185n }
  */
-export function aggregateBreakdowns(listOfBreakdowns, denominations = [1000,500,100,50,10,5,1]){
+export function aggregateBreakdowns(listOfBreakdowns, denominations = [1000,500,100,50,10,5,1], options = {}){
   // 防呆檢查：面額陣列不可為空
   if (!Array.isArray(denominations) || denominations.length === 0) {
     throw new Error('[Money Snap] 請至少選擇一種有效面額進行聚合計算！');
   }
-  
+
+  const profile = options.currencyProfile || getCurrencyProfile(options.currencyCode || 'TWD');
+  const usesMinorUnits = profile.decimals > 0;
+  if (usesMinorUnits) {
+    const denomPairs = toMinorUnitDenominations(denominations, profile);
+    const totals = {};
+    for (const denom of denominations) totals[denom] = 0;
+    let totalAmount = 0n;
+    for (const bd of listOfBreakdowns) {
+      for (const denom of denomPairs) {
+        const count = bd[denom.original] || 0;
+        totals[denom.original] += count;
+        totalAmount += BigInt(count) * BigInt(denom.scaled);
+      }
+    }
+    return { totals, totalAmount };
+  }
+
   const totals = {};
   for (const d of denominations) totals[d] = 0;
   // compute totalAmount as BigInt to be safe for very large sums

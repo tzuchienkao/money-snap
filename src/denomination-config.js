@@ -1,144 +1,130 @@
 // src/denomination-config.js
-// 面額設定管理模組
-// Export: DEFAULT_DENOMINATIONS, DEFAULT_ACTIVE_DENOMINATIONS,
-//         loadDenomConfig, saveDenomConfig, getActiveDenominations,
-//         setActiveDenominations, toggleSaveAsDefault
+// 多幣別面額設定與持久化管理
 
-/**
- * @typedef {Object} DenominationConfig
- * @property {boolean} enabled - 是否啟用自訂面額設定 (v0.4.0)
- * @property {number[]} activeDenominations - 目前啟用的面額清單 (由大至小排序)
- * @property {boolean} saveAsDefault - 是否儲存為使用者預設偏好
- */
+import { getCurrencyDenominations, getCurrencyProfile } from './currency.js';
 
-/**
- * 預設流通面額清單 (依面額由大至小排序)
- * 包含所有台幣流通面額：紙鈔 (2000/1000/500/200/100) + 硬幣 (50/20/10/5/1)
- */
-export const DEFAULT_DENOMINATIONS = [2000, 1000, 500, 200, 100, 50, 20, 10, 5, 1];
+export const DEFAULT_CURRENCY = 'TWD';
+export const DEFAULT_LANGUAGE = 'zh-TW';
+export const STORAGE_KEY = 'money_snap_multi_currency_config_v5';
 
-/**
- * 預設啟用面額清單 (排除罕見的 2000/200 元鈔票與 20 元硬幣)
- * 這是財務人員最常用的面額組合
- */
-export const DEFAULT_ACTIVE_DENOMINATIONS = [1000, 500, 100, 50, 10, 5, 1];
-
-/**
- * localStorage 儲存鍵名 (v0.4.0 版本)
- */
-const STORAGE_KEY = 'money_snap_denom_config_v4';
-
-/**
- * 目前的面額設定（記憶體快取）
- * @type {DenominationConfig}
- */
-let currentConfig = {
-  enabled: false,
-  activeDenominations: [...DEFAULT_ACTIVE_DENOMINATIONS],
-  saveAsDefault: false
+const DEFAULT_ACTIVE_BY_CURRENCY = {
+  TWD: [1000, 500, 100, 50, 10, 5, 1],
+  USD: [100, 50, 20, 10, 5, 1, 0.25, 0.1, 0.05, 0.01],
+  JPY: [10000, 5000, 1000, 500, 100, 50, 10, 5, 1],
+  KRW: [50000, 10000, 5000, 1000, 500, 100, 50, 10],
+  CNY: [100, 50, 20, 10, 5, 1, 0.5, 0.1],
+  HKD: [1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1],
+  EUR: [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05],
+  THB: [1000, 500, 100, 50, 20, 10, 5, 1, 0.5, 0.25]
 };
 
-/**
- * 從 localStorage 載入面額設定
- * 若無儲存記錄或解析失敗，則回傳預設設定
- * 
- * @returns {DenominationConfig} 面額設定物件
- * 
- * @example
- * const config = loadDenomConfig();
- * // => { activeDenominations: [1000,500,100,50,10,5,1], saveAsDefault: false }
- */
+export const DEFAULT_DENOMINATIONS = getCurrencyDenominations(DEFAULT_CURRENCY);
+export const DEFAULT_ACTIVE_DENOMINATIONS = [...DEFAULT_ACTIVE_BY_CURRENCY[DEFAULT_CURRENCY]];
+
+function uniqueSorted(denoms) {
+  return [...new Set(denoms)].sort((a, b) => b - a);
+}
+
+function getValidDenominations(currency) {
+  return getCurrencyDenominations(currency);
+}
+
+function getDefaultActiveDenominations(currency = DEFAULT_CURRENCY) {
+  return [...(DEFAULT_ACTIVE_BY_CURRENCY[currency] || getValidDenominations(currency))];
+}
+
+function createDefaultCurrencyState(currency = DEFAULT_CURRENCY) {
+  return {
+    isCustomEnabled: false,
+    activeDenominations: getDefaultActiveDenominations(currency)
+  };
+}
+
+function createDefaultConfig() {
+  return {
+    language: DEFAULT_LANGUAGE,
+    currency: DEFAULT_CURRENCY,
+    saveAsDefault: false,
+    currencies: {
+      TWD: createDefaultCurrencyState('TWD'),
+      USD: createDefaultCurrencyState('USD'),
+      JPY: createDefaultCurrencyState('JPY'),
+      KRW: createDefaultCurrencyState('KRW'),
+      CNY: createDefaultCurrencyState('CNY'),
+      HKD: createDefaultCurrencyState('HKD'),
+      EUR: createDefaultCurrencyState('EUR'),
+      THB: createDefaultCurrencyState('THB')
+    }
+  };
+}
+
+let currentConfig = createDefaultConfig();
+
+function ensureCurrencyState(currency) {
+  if (!currentConfig.currencies[currency]) {
+    currentConfig.currencies[currency] = createDefaultCurrencyState(currency);
+  }
+  return currentConfig.currencies[currency];
+}
+
+function normalizeCurrencyState(currency, rawState = {}) {
+  const valid = getValidDenominations(currency);
+  const active = uniqueSorted(
+    Array.isArray(rawState.activeDenominations) ? rawState.activeDenominations.filter((value) => valid.includes(value)) : []
+  );
+  return {
+    isCustomEnabled: Boolean(rawState.isCustomEnabled),
+    activeDenominations: active.length > 0 ? active : getDefaultActiveDenominations(currency)
+  };
+}
+
+function normalizeConfig(raw) {
+  const base = createDefaultConfig();
+  if (!raw || typeof raw !== 'object') {
+    return base;
+  }
+
+  const currency = raw.currency && base.currencies[raw.currency] ? raw.currency : DEFAULT_CURRENCY;
+  const language = raw.language === 'en-US' ? 'en-US' : DEFAULT_LANGUAGE;
+
+  const currencies = {};
+  for (const code of Object.keys(base.currencies)) {
+    currencies[code] = normalizeCurrencyState(code, raw.currencies && raw.currencies[code]);
+  }
+
+  return {
+    language,
+    currency,
+    saveAsDefault: Boolean(raw.saveAsDefault),
+    currencies
+  };
+}
+
+function persistConfig(config) {
+  if (!config.saveAsDefault) {
+    localStorage.removeItem(STORAGE_KEY);
+    return true;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  return true;
+}
+
 export function loadDenomConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      // 無儲存記錄，使用預設設定
-      currentConfig = {
-        enabled: false,
-        activeDenominations: [...DEFAULT_ACTIVE_DENOMINATIONS],
-        saveAsDefault: false
-      };
-      return currentConfig;
-    }
-    
-    const parsed = JSON.parse(raw);
-    
-    // 驗證資料結構
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Invalid config structure');
-    }
-    
-    // 驗證 activeDenominations 是否為陣列且包含有效面額
-    if (!Array.isArray(parsed.activeDenominations) || parsed.activeDenominations.length === 0) {
-      throw new Error('Invalid activeDenominations');
-    }
-    
-    // 過濾無效面額（必須在 DEFAULT_DENOMINATIONS 中）
-    const validDenoms = parsed.activeDenominations.filter(d => DEFAULT_DENOMINATIONS.includes(d));
-    
-    if (validDenoms.length === 0) {
-      throw new Error('No valid denominations found');
-    }
-    
-    // 確保由大至小排序
-    validDenoms.sort((a, b) => b - a);
-    
-    currentConfig = {
-      enabled: Boolean(parsed.enabled),
-      activeDenominations: validDenoms,
-      saveAsDefault: Boolean(parsed.saveAsDefault)
-    };
-    
-    return currentConfig;
+    currentConfig = normalizeConfig(raw ? JSON.parse(raw) : null);
+    return getCurrentConfig();
   } catch (e) {
     console.warn('[DenomConfig] Failed to load config from localStorage, using defaults:', e);
-    currentConfig = {
-      enabled: false,
-      activeDenominations: [...DEFAULT_ACTIVE_DENOMINATIONS],
-      saveAsDefault: false
-    };
-    return currentConfig;
+    currentConfig = createDefaultConfig();
+    return getCurrentConfig();
   }
 }
 
-/**
- * 儲存面額設定至 localStorage
- * 僅在 saveAsDefault 為 true 時執行實際儲存
- * 
- * @param {DenominationConfig} config - 面額設定物件
- * @returns {boolean} 儲存是否成功
- * 
- * @example
- * saveDenomConfig({
- *   activeDenominations: [1000, 100, 10, 1],
- *   saveAsDefault: true
- * });
- */
 export function saveDenomConfig(config) {
   try {
-    // 僅在啟用「記住偏好」時才儲存
-    if (!config.saveAsDefault) {
-      // 若使用者取消「記住偏好」，則清除 localStorage 記錄
-      localStorage.removeItem(STORAGE_KEY);
-      return true;
-    }
-    
-    // 驗證資料結構
-    if (!config || !Array.isArray(config.activeDenominations)) {
-      throw new Error('Invalid config structure');
-    }
-    
-    // 確保由大至小排序後再儲存
-    const sortedDenoms = [...config.activeDenominations].sort((a, b) => b - a);
-    
-    const toSave = {
-      enabled: Boolean(config.enabled),
-      activeDenominations: sortedDenoms,
-      saveAsDefault: Boolean(config.saveAsDefault)
-    };
-    
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-    currentConfig = toSave;
+    currentConfig = normalizeConfig(config);
+    persistConfig(currentConfig);
     return true;
   } catch (e) {
     console.error('[DenomConfig] Failed to save config to localStorage:', e);
@@ -146,55 +132,57 @@ export function saveDenomConfig(config) {
   }
 }
 
-/**
- * 取得當前啟用的面額陣列（由大至小排序）
- * 
- * @returns {number[]} 啟用的面額陣列
- * 
- * @example
- * const activeDenoms = getActiveDenominations();
- * // => [1000, 500, 100, 50, 10, 5, 1]
- */
-export function getActiveDenominations() {
-  return [...currentConfig.activeDenominations];
+export function getCurrentCurrency() {
+  return currentConfig.currency;
 }
 
-/**
- * 更新當前啟用的面額陣列
- * 自動排序並更新記憶體快取
- * 若啟用「記住偏好」，則同步儲存至 localStorage
- * 
- * @param {number[]} denoms - 新的啟用面額陣列
- * @returns {boolean} 更新是否成功
- * 
- * @example
- * setActiveDenominations([1000, 100, 10, 1]); // 排除 500/50/5
- */
-export function setActiveDenominations(denoms) {
+export function setCurrentCurrency(currency) {
+  getCurrencyProfile(currency);
+  currentConfig.currency = currency;
+  ensureCurrencyState(currency);
+  if (currentConfig.saveAsDefault) {
+    persistConfig(currentConfig);
+  }
+  return true;
+}
+
+export function getLanguage() {
+  return currentConfig.language;
+}
+
+export function setLanguage(language) {
+  if (language !== 'zh-TW' && language !== 'en-US') {
+    throw new Error(`[DenomConfig] Unsupported language: ${language}`);
+  }
+  currentConfig.language = language;
+  if (currentConfig.saveAsDefault) {
+    persistConfig(currentConfig);
+  }
+  return true;
+}
+
+export function getAvailableDenominations(currency = currentConfig.currency) {
+  return [...getValidDenominations(currency)];
+}
+
+export function getActiveDenominations(currency = currentConfig.currency) {
+  return [...ensureCurrencyState(currency).activeDenominations];
+}
+
+export function setActiveDenominations(denoms, currency = currentConfig.currency) {
   try {
-    // 驗證輸入
     if (!Array.isArray(denoms) || denoms.length === 0) {
       throw new Error('Invalid denominations array');
     }
-    
-    // 過濾無效面額
-    const validDenoms = denoms.filter(d => DEFAULT_DENOMINATIONS.includes(d));
-    
-    if (validDenoms.length === 0) {
+    const valid = getValidDenominations(currency);
+    const active = uniqueSorted(denoms.filter((value) => valid.includes(value)));
+    if (active.length === 0) {
       throw new Error('No valid denominations provided');
     }
-    
-    // 確保由大至小排序
-    validDenoms.sort((a, b) => b - a);
-    
-    // 更新記憶體快取
-    currentConfig.activeDenominations = validDenoms;
-    
-    // 若啟用「記住偏好」，同步儲存至 localStorage
+    ensureCurrencyState(currency).activeDenominations = active;
     if (currentConfig.saveAsDefault) {
-      saveDenomConfig(currentConfig);
+      persistConfig(currentConfig);
     }
-    
     return true;
   } catch (e) {
     console.error('[DenomConfig] Failed to set active denominations:', e);
@@ -202,23 +190,22 @@ export function setActiveDenominations(denoms) {
   }
 }
 
-/**
- * 切換「記住偏好」選項
- * 
- * @param {boolean} enabled - 是否啟用記住偏好
- * @returns {boolean} 操作是否成功
- * 
- * @example
- * toggleSaveAsDefault(true);  // 啟用記住偏好
- * toggleSaveAsDefault(false); // 停用記住偏好（清除 localStorage）
- */
+export function isCustomDenomEnabled(currency = currentConfig.currency) {
+  return Boolean(ensureCurrencyState(currency).isCustomEnabled);
+}
+
+export function setCustomDenomEnabled(enabled, currency = currentConfig.currency) {
+  ensureCurrencyState(currency).isCustomEnabled = Boolean(enabled);
+  if (currentConfig.saveAsDefault) {
+    persistConfig(currentConfig);
+  }
+  return true;
+}
+
 export function toggleSaveAsDefault(enabled) {
   try {
     currentConfig.saveAsDefault = Boolean(enabled);
-    
-    // 立即同步儲存狀態
-    saveDenomConfig(currentConfig);
-    
+    persistConfig(currentConfig);
     return true;
   } catch (e) {
     console.error('[DenomConfig] Failed to toggle saveAsDefault:', e);
@@ -226,28 +213,34 @@ export function toggleSaveAsDefault(enabled) {
   }
 }
 
-/**
- * 取得當前完整設定物件（唯讀副本）
- * 
- * @returns {DenominationConfig} 當前設定物件的副本
- */
-export function getCurrentConfig() {
+export function getCurrencyConfig(currency = currentConfig.currency) {
+  const state = ensureCurrencyState(currency);
   return {
-    activeDenominations: [...currentConfig.activeDenominations],
-    saveAsDefault: currentConfig.saveAsDefault
+    currency,
+    isCustomEnabled: state.isCustomEnabled,
+    activeDenominations: [...state.activeDenominations]
   };
 }
 
-/**
- * 重置為預設設定
- * 
- * @returns {boolean} 重置是否成功
- */
-export function resetToDefaults() {
-  currentConfig = {
-    activeDenominations: [...DEFAULT_ACTIVE_DENOMINATIONS],
-    saveAsDefault: false
+export function getCurrentConfig() {
+  const state = ensureCurrencyState(currentConfig.currency);
+  return {
+    language: currentConfig.language,
+    currency: currentConfig.currency,
+    saveAsDefault: currentConfig.saveAsDefault,
+    enabled: state.isCustomEnabled,
+    isCustomEnabled: state.isCustomEnabled,
+    activeDenominations: [...state.activeDenominations],
+    currencies: JSON.parse(JSON.stringify(currentConfig.currencies))
   };
+}
+
+export function resetToDefaults(currency = null) {
+  if (currency) {
+    currentConfig.currencies[currency] = createDefaultCurrencyState(currency);
+  } else {
+    currentConfig = createDefaultConfig();
+  }
   localStorage.removeItem(STORAGE_KEY);
   return true;
 }
