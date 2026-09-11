@@ -3,6 +3,7 @@
 // Export: parseInput(text, hasNameFlag) -> { entries: [{name, amt}], inputSum, error: {line, raw, message} | null }
 
 import { MAX_ENTRIES, MAX_PER_ENTRY } from './config.js';
+import { detectCurrencySymbolMismatch, getCurrencyProfile, scaleAmount, stripAllowedCurrencySymbols } from './currency.js';
 
 /**
  * @typedef {Object} ParsedEntry
@@ -44,6 +45,7 @@ import { MAX_ENTRIES, MAX_PER_ENTRY } from './config.js';
  * 
  * @param {string} text - 輸入框原始文字（多行文本）
  * @param {boolean} [hasNameFlag=true] - 是否包含姓名欄位
+ * @param {{ currencyCode?: import('./currency.js').CurrencyCode, currencyProfile?: import('./currency.js').CurrencyProfile, buildItemName?: (index:number) => string }} [options]
  * @returns {ParseResult} 解析結果物件
  * 
  * @example
@@ -56,13 +58,22 @@ import { MAX_ENTRIES, MAX_PER_ENTRY } from './config.js';
  * parseInput("1200\n300", false)
  * // => { entries: [{name:"項目 #1",amt:1200n},{name:"項目 #2",amt:300n}], inputSum:1500n, error:null }
  */
-export function parseInput(text, hasNameFlag = true) {
+export function parseInput(text, hasNameFlag = true, options = {}) {
+  const makeError = (line, raw, code, message, meta = {}) => ({
+    entries: [],
+    inputSum: 0,
+    error: { line, raw, code, meta, message }
+  });
   if (typeof text !== 'string') {
-    return { entries: [], inputSum: 0, error: { line: 0, raw: '', message: '輸入非字串' } };
+    return makeError(0, '', 'INVALID_INPUT_TYPE', '輸入非字串');
   }
+  const profile = options.currencyProfile || getCurrencyProfile(options.currencyCode || 'TWD');
+  const buildItemName = typeof options.buildItemName === 'function'
+    ? options.buildItemName
+    : (index) => `項目 #${index}`;
   const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   if (rawLines.length > MAX_ENTRIES) {
-    return { entries: [], inputSum: 0, error: { line: 0, raw: '', message: `輸入筆數超過上限 ${MAX_ENTRIES} 筆` } };
+    return makeError(0, '', 'TOO_MANY_ENTRIES', `輸入筆數超過上限 ${MAX_ENTRIES} 筆`, { max: MAX_ENTRIES });
   }
   const entries = [];
   for (let i = 0; i < rawLines.length; i++) {
@@ -74,53 +85,84 @@ export function parseInput(text, hasNameFlag = true) {
       // 含姓名模式：找第一個欄位分隔符（Tab、半形逗號、全形逗號），避免把金額內的千分位逗號切開
       const match = raw.match(/[\t,，]/);
       if (!match) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（需要姓名與金額）' } };
+        return makeError(i + 1, raw, 'MISSING_FIELDS', '欄位數不足（需要姓名與金額）');
       }
       const idx = match.index;
       namePart = raw.slice(0, idx).trim();
       amtPart = raw.slice(idx + 1).trim();
       if (!namePart || !amtPart) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '欄位數不足（姓名或金額為空）' } };
+        return makeError(i + 1, raw, 'EMPTY_NAME_OR_AMOUNT', '欄位數不足（姓名或金額為空）');
       }
     } else {
       // 純金額模式：整行當作金額，姓名自動編號
-      namePart = `項目 #${i + 1}`;
+      namePart = buildItemName(i + 1);
       amtPart = raw.trim();
       if (!amtPart) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: '金額為空' } };
+        return makeError(i + 1, raw, 'EMPTY_AMOUNT', '金額為空');
       }
     }
 
-    // 金額容錯：移除貨幣符號、空白，保留千分位逗號以利後續清理
-    let amtRaw = amtPart.replace(/[\$¥€￡¥]/g, '');
+    const mismatchedSymbol = detectCurrencySymbolMismatch(amtPart, profile);
+    if (mismatchedSymbol) {
+      return makeError(
+        i + 1,
+        raw,
+        'CURRENCY_SYMBOL_MISMATCH',
+        `金額幣別符號與目前選擇的 ${profile.code} 不一致：'${amtPart}'`,
+        { currency: profile.code, symbol: mismatchedSymbol, value: amtPart }
+      );
+    }
+
+    // 金額容錯：僅移除當前幣別允許的貨幣符號與空白，保留千分位逗號以利後續清理
+    let amtRaw = stripAllowedCurrencySymbols(amtPart, profile);
     // 移除千分位逗號（包含全形逗號）與空白
     amtRaw = amtRaw.replace(/[\,，\s]/g, '');
 
     // 允許負號與小數點
     if (!/^-?\d+(?:\.\d+)?$/.test(amtRaw)) {
-      return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: `金額格式錯誤：'${amtPart}'` } };
+      return makeError(i + 1, raw, 'INVALID_AMOUNT_FORMAT', `金額格式錯誤：'${amtPart}'`, { value: amtPart });
     }
     // 若為整數（無小數點），使用 BigInt 以避免大數精度問題；否則使用 Number
     let amt;
-    if (/^-?\d+$/.test(amtRaw)) {
+    if (profile.decimals > 0) {
+      const fraction = amtRaw.split('.')[1] || '';
+      if (fraction.length > profile.decimals) {
+        return makeError(
+          i + 1,
+          raw,
+          'TOO_MANY_DECIMALS',
+          `金額小數位數超過 ${profile.code} 允許的 ${profile.decimals} 位：'${amtPart}'`,
+          { currency: profile.code, decimals: profile.decimals, value: amtPart }
+        );
+      }
+      const integerPart = amtRaw.replace(/^-/, '').split('.')[0] || '0';
+      if (BigInt(integerPart) > BigInt(MAX_PER_ENTRY)) {
+        return makeError(i + 1, raw, 'AMOUNT_EXCEEDS_LIMIT', `金額超過單筆上限 ${MAX_PER_ENTRY}`, { max: MAX_PER_ENTRY });
+      }
+      try {
+        amt = scaleAmount(amtRaw, profile);
+      } catch (e) {
+        return makeError(i + 1, raw, 'INVALID_AMOUNT_FORMAT', `金額格式錯誤：'${amtPart}'`, { value: amtPart });
+      }
+    } else if (/^-?\d+$/.test(amtRaw)) {
       try {
         amt = BigInt(amtRaw);
       } catch (e) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: `金額過大或格式錯誤：'${amtPart}'` } };
+        return makeError(i + 1, raw, 'AMOUNT_TOO_LARGE', `金額過大或格式錯誤：'${amtPart}'`, { value: amtPart });
       }
       // per-entry limit check
       const abs = (amt < 0n) ? -amt : amt;
       if (abs > BigInt(MAX_PER_ENTRY)) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: `金額超過單筆上限 ${MAX_PER_ENTRY}` } };
+        return makeError(i + 1, raw, 'AMOUNT_EXCEEDS_LIMIT', `金額超過單筆上限 ${MAX_PER_ENTRY}`, { max: MAX_PER_ENTRY });
       }
     } else {
       // 小數情況，保留為 Number（若需要更高精度可改為 cents-based BigInt）
       amt = Number(amtRaw);
       if (Number.isNaN(amt)) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: `無法解析金額：'${amtPart}'` } };
+        return makeError(i + 1, raw, 'UNPARSEABLE_AMOUNT', `無法解析金額：'${amtPart}'`, { value: amtPart });
       }
       if (Math.abs(Math.floor(amt)) > MAX_PER_ENTRY) {
-        return { entries: [], inputSum: 0, error: { line: i + 1, raw, message: `金額超過單筆上限 ${MAX_PER_ENTRY}` } };
+        return makeError(i + 1, raw, 'AMOUNT_EXCEEDS_LIMIT', `金額超過單筆上限 ${MAX_PER_ENTRY}`, { max: MAX_PER_ENTRY });
       }
     }
     entries.push({ name: namePart, amt });
